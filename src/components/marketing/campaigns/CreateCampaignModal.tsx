@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { 
   Dialog, 
   DialogContent, 
@@ -61,7 +61,7 @@ export function CreateCampaignModal({ open, onClose }: CreateCampaignModalProps)
   const { data: templates = [] } = useQuery({
     queryKey: ['marketing-templates'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_templates')
         .select('*')
         .eq('status', 'active');
@@ -74,7 +74,7 @@ export function CreateCampaignModal({ open, onClose }: CreateCampaignModalProps)
   const { data: segments = [] } = useQuery({
     queryKey: ['lead-segments'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('lead_segments')
         .select('*')
         .eq('is_active', true);
@@ -88,13 +88,13 @@ export function CreateCampaignModal({ open, onClose }: CreateCampaignModalProps)
     queryKey: ['recipient-count', formData.recipient_filter],
     queryFn: async () => {
       if (formData.recipient_filter.type === 'all') {
-        const { count } = await supabase
+        const { count } = await api
           .from('crm_contacts')
           .select('*', { count: 'exact', head: true });
         return count || 0;
       }
       if (formData.recipient_filter.type === 'segment' && formData.recipient_filter.segment_id) {
-        const { count } = await supabase
+        const { count } = await api
           .from('lead_segment_members')
           .select('*', { count: 'exact', head: true })
           .eq('segment_id', formData.recipient_filter.segment_id);
@@ -120,7 +120,7 @@ export function CreateCampaignModal({ open, onClose }: CreateCampaignModalProps)
         status: formData.send_at ? 'scheduled' : 'draft',
       };
 
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_campaigns')
         .insert([campaignData])
         .select()

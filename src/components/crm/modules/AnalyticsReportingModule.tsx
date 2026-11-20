@@ -1,7 +1,7 @@
 import { memo, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -24,7 +24,7 @@ export function AnalyticsReportingModule() {
   const { data: contacts = [], isLoading } = useQuery({
     queryKey: ['crm-analytics-contacts', period],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('crm_contacts')
         .select('id, source, city, state, course, lead_score, lead_quality, stage_id, created_at, pipeline_stages(name)')
         .gte('created_at', since)
@@ -39,7 +39,7 @@ export function AnalyticsReportingModule() {
   const { data: activitiesCount = 0 } = useQuery({
     queryKey: ['crm-analytics-activities', period],
     queryFn: async () => {
-      const { count, error } = await supabase
+      const { count, error } = await api
         .from('crm_activities')
         .select('id', { count: 'exact', head: true })
         .gte('created_at', since);

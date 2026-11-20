@@ -1,1 +1,0 @@
-ALTER TABLE public.universities ADD COLUMN IF NOT EXISTS utm_link TEXT;

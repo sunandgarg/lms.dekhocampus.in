@@ -160,7 +160,7 @@ export function validateLeads(leads: Lead[], config?: LeadValidationConfig): {
 export async function checkDatabaseDuplicates(
   leads: Lead[],
   universityId: string,
-  supabase: any
+  api: any
 ): Promise<{ duplicates: { email: string; mobile: string; existingId: string }[]; emails: Set<string>; mobiles: Set<string> }> {
   const emails = leads.map(l => l.email?.trim().toLowerCase()).filter(Boolean);
   const mobiles = leads.map(l => l.mobile?.replace(/[\s\-().+]/g, '')).filter(Boolean);
@@ -178,7 +178,7 @@ export async function checkDatabaseDuplicates(
     conditions.push(`mobile.in.(${mobiles.join(',')})`);
   }
 
-  const { data: existingLeads, error } = await supabase
+  const { data: existingLeads, error } = await api
     .from('leads')
     .select('id, email, mobile')
     .eq('university_id', universityId)
@@ -204,7 +204,10 @@ export async function checkDatabaseDuplicates(
 // Generate CSV from leads (for export)
 export function generateLeadsCSV(leads: Lead[], customColumns?: string[]): string {
   const baseHeaders = ['name', 'email', 'mobile', 'state', 'city', 'course', 'specialization', 'source', 'medium', 'campaign'];
-  const headers = [...baseHeaders, ...(customColumns || [])];
+  const reserved = new Set([...baseHeaders, 'leadSource', 'leadMedium', 'leadCampaign']);
+  const extraHeaders = [...new Set([...(customColumns || []), ...leads.flatMap(lead => Object.keys(lead))])]
+    .filter(key => !reserved.has(key));
+  const headers = [...baseHeaders, ...extraHeaders];
   
   const rows = leads.map(lead => {
     const baseValues = [
@@ -220,12 +223,12 @@ export function generateLeadsCSV(leads: Lead[], customColumns?: string[]): strin
       lead.leadCampaign || '',
     ];
     
-    const customValues = (customColumns || []).map(col => lead[col] || '');
+    const customValues = extraHeaders.map(col => lead[col] || '');
     
     return [...baseValues, ...customValues].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
   });
 
-  return [headers.join(','), ...rows].join('\n');
+  return [headers.map(header => `"${header.replace(/"/g, '""')}"`).join(','), ...rows].join('\n');
 }
 
 // Build validation config from university custom columns

@@ -18,7 +18,7 @@
    Star,
    Zap
  } from 'lucide-react';
- import { supabase } from '@/integrations/supabase/client';
+ import { api } from '@/integrations/api/client';
  import { useToast } from '@/hooks/use-toast';
  
  interface WhatsAppConfig {
@@ -60,7 +60,7 @@
  
    const fetchConfig = async () => {
      try {
-       const { data, error } = await supabase
+       const { data, error } = await api
          .from('marketing_integrations')
          .select('*')
          .eq('type', 'whatsapp')
@@ -110,12 +110,12 @@
        };
  
        if (config.id) {
-         await supabase
+         await api
            .from('marketing_integrations')
            .update(integrationData)
            .eq('id', config.id);
        } else {
-         const { data } = await supabase
+         const { data } = await api
            .from('marketing_integrations')
            .insert(integrationData)
            .select()

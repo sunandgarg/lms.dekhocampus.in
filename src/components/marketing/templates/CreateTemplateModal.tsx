@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { 
   Dialog, 
   DialogContent, 
@@ -61,7 +61,7 @@ export function CreateTemplateModal({ open, onClose }: CreateTemplateModalProps)
         status: 'draft',
       };
 
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_templates')
         .insert([templateData])
         .select()

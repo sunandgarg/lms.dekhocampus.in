@@ -3,13 +3,10 @@ import { Trash2, AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 const PURGE_TARGETS = [
-  { key: 'api_logs', label: 'API Logs', description: 'Request/response logs from lead pushes' },
-  { key: 'leads', label: 'Leads', description: 'Lead records stored in database' },
-  { key: 'upload_batches', label: 'Batch Records', description: 'Upload batch history records' },
   { key: 'automation_logs', label: 'Automation Logs', description: 'Automation rule execution logs' },
   { key: 'email_logs', label: 'Email Logs', description: 'SMTP email sending logs' },
   { key: 'email_events', label: 'Email Events', description: 'Email open/click tracking events' },
@@ -38,7 +35,7 @@ function AdminDataPurgeInner() {
     }
     setPurging(tableKey);
     try {
-      let query = supabase.from(tableKey as any).delete();
+      let query = api.from(tableKey as any).delete();
       
       if (days > 0) {
         const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();

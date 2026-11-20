@@ -1,6 +1,6 @@
 import { memo, useState, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -138,7 +138,7 @@ export function FunnelCampaignBuilder({ campaignId, onBack }: Props) {
     queryKey: ['funnel-campaign', campaignId],
     queryFn: async () => {
       if (!campaignId) return null;
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('funnel_campaigns')
         .select('*')
         .eq('id', campaignId)
@@ -176,12 +176,12 @@ export function FunnelCampaignBuilder({ campaignId, onBack }: Props) {
       if (!campaignId) return null;
       // Use count queries instead of loading all contacts
       const [total, clicked, opened, bounced, pushQueued, pushDone] = await Promise.all([
-        supabase.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId),
-        supabase.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('engagement_type', 'clicked'),
-        supabase.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('engagement_type', 'opened'),
-        supabase.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('email_bounced', true),
-        supabase.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('push_status', 'queued'),
-        supabase.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('push_status', 'pushed'),
+        api.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId),
+        api.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('engagement_type', 'clicked'),
+        api.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('engagement_type', 'opened'),
+        api.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('email_bounced', true),
+        api.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('push_status', 'queued'),
+        api.from('funnel_campaign_contacts').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('push_status', 'pushed'),
       ]);
       return {
         total: total.count || 0,
@@ -201,7 +201,7 @@ export function FunnelCampaignBuilder({ campaignId, onBack }: Props) {
   const { data: universities = [] } = useQuery({
     queryKey: ['funnel-universities'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('universities').select('id, name').order('name');
+      const { data, error } = await api.from('universities').select('id, name').order('name');
       if (error) throw error;
       return data;
     },
@@ -291,10 +291,10 @@ export function FunnelCampaignBuilder({ campaignId, onBack }: Props) {
 
       let cId = campaignId;
       if (campaignId) {
-        const { error } = await supabase.from('funnel_campaigns').update(payload).eq('id', campaignId);
+        const { error } = await api.from('funnel_campaigns').update(payload).eq('id', campaignId);
         if (error) throw error;
       } else {
-        const { data, error } = await supabase.from('funnel_campaigns').insert(payload).select('id').single();
+        const { data, error } = await api.from('funnel_campaigns').insert(payload).select('id').single();
         if (error) throw error;
         cId = data.id;
       }
@@ -354,7 +354,7 @@ export function FunnelCampaignBuilder({ campaignId, onBack }: Props) {
               promises.push(
                 (async () => {
                   try {
-                    const { error: insertError } = await supabase.from('funnel_campaign_contacts').insert(chunk);
+                    const { error: insertError } = await api.from('funnel_campaign_contacts').insert(chunk);
                     if (insertError) {
                       failedChunks++;
                       console.error('Chunk insert failed:', insertError.message);
@@ -376,7 +376,7 @@ export function FunnelCampaignBuilder({ campaignId, onBack }: Props) {
 
         // Update total count
         const actualCount = rows.length - failedChunks * CHUNK_SIZE; // approximate
-        await supabase.from('funnel_campaigns').update({ total_contacts: Math.max(actualCount, 0) }).eq('id', cId);
+        await api.from('funnel_campaigns').update({ total_contacts: Math.max(actualCount, 0) }).eq('id', cId);
         
         // Clear raw data from memory
         rawCsvRows.current = [];

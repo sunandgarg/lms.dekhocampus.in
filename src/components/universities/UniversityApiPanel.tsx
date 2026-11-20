@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase, supabaseProjectUrl } from '@/integrations/supabase/client';
+import { api, apiBaseUrl } from '@/integrations/api/client';
 import { Copy, Check, Key, RefreshCw, Eye, EyeOff, Code, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -16,7 +16,7 @@ export function UniversityApiPanel({ universityId, universityName }: UniversityA
   const [regenerating, setRegenerating] = useState(false);
   const { toast } = useToast();
 
-  const supabaseUrl = supabaseProjectUrl;
+  const apiUrl = apiBaseUrl;
 
   useEffect(() => {
     fetchApiKey();
@@ -24,7 +24,7 @@ export function UniversityApiPanel({ universityId, universityName }: UniversityA
 
   const fetchApiKey = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('university_api_keys')
         .select('api_key')
         .eq('university_id', universityId)
@@ -35,7 +35,7 @@ export function UniversityApiPanel({ universityId, universityName }: UniversityA
       
       if (!data) {
         // Create new API key
-        const { data: newKey, error: createError } = await supabase
+        const { data: newKey, error: createError } = await api
           .from('university_api_keys')
           .insert({ university_id: universityId, name: 'Default API Key' })
           .select('api_key')
@@ -59,13 +59,13 @@ export function UniversityApiPanel({ universityId, universityName }: UniversityA
     setRegenerating(true);
     try {
       // Deactivate old key
-      await supabase
+      await api
         .from('university_api_keys')
         .update({ is_active: false })
         .eq('university_id', universityId);
 
       // Create new key
-      const { data: newKey, error } = await supabase
+      const { data: newKey, error } = await api
         .from('university_api_keys')
         .insert({ university_id: universityId, name: 'Default API Key' })
         .select('api_key')
@@ -87,7 +87,7 @@ export function UniversityApiPanel({ universityId, universityName }: UniversityA
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const apiEndpoint = `${supabaseUrl}/functions/v1/receive-lead`;
+  const apiEndpoint = `${apiUrl}/api/inbound/lead`;
 
   const samplePayload = {
     university_id: universityId,

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 
 interface CustomDomain {
   id: string;
@@ -38,7 +38,7 @@ export const UrlCustomDomains = memo(function UrlCustomDomains() {
 
   const fetchDomains = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('custom_domains')
         .select('*')
         .order('created_at', { ascending: false });
@@ -77,10 +77,10 @@ export const UrlCustomDomains = memo(function UrlCustomDomains() {
 
     setAdding(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await api.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('custom_domains')
         .insert({
           user_id: user.id,
@@ -119,7 +119,7 @@ export const UrlCustomDomains = memo(function UrlCustomDomains() {
     setVerifyingId(domain.id);
     try {
       // Call edge function to verify DNS
-      const { data, error } = await supabase.functions.invoke('verify-domain', {
+      const { data, error } = await api.functions.invoke('verify-domain', {
         body: { domainId: domain.id, domain: domain.domain, token: domain.verification_token },
       });
 
@@ -151,7 +151,7 @@ export const UrlCustomDomains = memo(function UrlCustomDomains() {
     if (!confirm(`Remove ${domain.domain}? Short URLs using this domain will fall back to the default domain.`)) return;
 
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('custom_domains')
         .delete()
         .eq('id', domain.id);

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Plus, 
@@ -71,7 +71,7 @@ export function LeadSegmentsView() {
 
   const fetchSegments = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('lead_segments')
         .select('*')
         .order('created_at', { ascending: false });
@@ -101,7 +101,7 @@ export function LeadSegmentsView() {
   const calculateSegmentCount = async (filterConfig: any): Promise<number> => {
     try {
       // Simple count based on filter - in production this would be more sophisticated
-      let query = supabase.from('crm_contacts').select('id', { count: 'exact', head: true });
+      let query = api.from('crm_contacts').select('id', { count: 'exact', head: true });
       
       const conditions = filterConfig?.conditions || [];
       for (const cond of conditions) {
@@ -163,7 +163,7 @@ export function LeadSegmentsView() {
         is_active: true,
       };
 
-      const { error } = await supabase.from('lead_segments').insert([insertData]);
+      const { error } = await api.from('lead_segments').insert([insertData]);
 
       if (error) throw error;
 
@@ -185,7 +185,7 @@ export function LeadSegmentsView() {
 
   const deleteSegment = async (segmentId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('lead_segments')
         .delete()
         .eq('id', segmentId);

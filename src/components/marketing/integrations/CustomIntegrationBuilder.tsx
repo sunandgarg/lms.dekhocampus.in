@@ -36,7 +36,7 @@ import {
   Settings,
   Zap
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 interface CustomIntegration {
@@ -99,7 +99,7 @@ export function CustomIntegrationBuilder() {
 
   const fetchIntegrations = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_custom_integrations')
         .select('*')
         .order('created_at', { ascending: false });
@@ -179,14 +179,14 @@ export function CustomIntegrationBuilder() {
 
     try {
       if (editingId) {
-        const { error } = await supabase
+        const { error } = await api
           .from('marketing_custom_integrations')
           .update(payload)
           .eq('id', editingId);
         if (error) throw error;
         toast({ title: 'Integration updated' });
       } else {
-        const { error } = await supabase
+        const { error } = await api
           .from('marketing_custom_integrations')
           .insert(payload);
         if (error) throw error;
@@ -203,7 +203,7 @@ export function CustomIntegrationBuilder() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_custom_integrations')
         .delete()
         .eq('id', id);
@@ -256,7 +256,7 @@ export function CustomIntegrationBuilder() {
       }
 
       // Make the test request via edge function
-      const { data, error } = await supabase.functions.invoke('test-custom-integration', {
+      const { data, error } = await api.functions.invoke('test-custom-integration', {
         body: {
           baseUrl: formData.base_url,
           method: formData.method,

@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { CalendarIcon, AlertCircle } from 'lucide-react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const KPI_CONFIG = [
@@ -42,13 +42,13 @@ export function EmailDashboard() {
   }, [fromDate, toDate]);
 
   const checkApiKey = async () => {
-    const { data } = await supabase.from('email_api_settings').select('api_key').limit(1).single();
+    const { data } = await api.from('email_api_settings').select('api_key').limit(1).single();
     setHasApiKey(!!(data?.api_key));
   };
 
   const fetchEvents = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await api
       .from('email_events')
       .select('event_type, received_at')
       .gte('received_at', fromDate.toISOString())

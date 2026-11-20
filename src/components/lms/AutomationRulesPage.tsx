@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Trash2, Edit, Copy, Zap, X, Download, Loader2, RefreshCw } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 
 interface Condition {
   id: string;
@@ -117,9 +117,9 @@ export function AutomationRulesPage() {
     setLoading(true);
     try {
       const [rulesRes, logsRes, uniRes] = await Promise.all([
-        supabase.from('automation_rules').select('*').order('priority', { ascending: true }),
-        supabase.from('automation_logs').select('*').order('created_at', { ascending: false }).limit(100),
-        supabase.from('universities').select('id, name, column_mapping'),
+        api.from('automation_rules').select('*').order('priority', { ascending: true }),
+        api.from('automation_logs').select('*').order('created_at', { ascending: false }).limit(100),
+        api.from('universities').select('id, name, column_mapping'),
       ]);
 
       if (rulesRes.data) {
@@ -249,10 +249,10 @@ export function AutomationRulesPage() {
       };
 
       if (editingRule) {
-        const { error } = await supabase.from('automation_rules').update(payload).eq('id', editingRule.id);
+        const { error } = await api.from('automation_rules').update(payload).eq('id', editingRule.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('automation_rules').insert(payload);
+        const { error } = await api.from('automation_rules').insert(payload);
         if (error) throw error;
       }
 
@@ -267,7 +267,7 @@ export function AutomationRulesPage() {
   };
 
   const duplicateRule = async (rule: AutomationRule) => {
-    const { error } = await supabase.from('automation_rules').insert({
+    const { error } = await api.from('automation_rules').insert({
       name: rule.name + ' (Copy)',
       description: rule.description,
       priority: rule.priority,
@@ -284,14 +284,14 @@ export function AutomationRulesPage() {
 
   const deleteRule = async (id: string) => {
     if (!confirm('Delete this rule?')) return;
-    const { error } = await supabase.from('automation_rules').delete().eq('id', id);
+    const { error } = await api.from('automation_rules').delete().eq('id', id);
     if (error) toast({ title: 'Error', description: error.message, variant: 'destructive' });
     else { toast({ title: 'Rule Deleted' }); fetchData(); }
   };
 
   const toggleStatus = async (id: string, currentStatus: string) => {
     const newStatus = currentStatus === 'Active' ? 'Paused' : 'Active';
-    const { error } = await supabase.from('automation_rules').update({ status: newStatus }).eq('id', id);
+    const { error } = await api.from('automation_rules').update({ status: newStatus }).eq('id', id);
     if (!error) fetchData();
   };
 
@@ -516,41 +516,14 @@ export function AutomationRulesPage() {
                       <Input className="h-7 flex-1" value={action.value} onChange={e => { const n = [...actions]; n[idx].value = e.target.value; setActions(n); }} />
                     </div>
                   )}
-                  {action.type === 'tag' && <Input placeholder="Tag name e.g. high-priority" value={action.tag} onChange={e => { const n = [...actions]; n[idx].tag = e.target.value; setActions(n); }} />}
-                  {action.type === 'notify' && <Input placeholder="Notification email" type="email" value={action.email} onChange={e => { const n = [...actions]; n[idx].email = e.target.value; setActions(n); }} />}
                 </Card>
               ))}
               <div className="flex gap-2 flex-wrap">
                 <Button variant="outline" size="sm" onClick={() => addAction('push')}>+ Push to University</Button>
                 <Button variant="outline" size="sm" onClick={() => addAction('set_default')}>+ Set Default</Button>
-                <Button variant="outline" size="sm" onClick={() => addAction('tag')}>+ Tag Lead</Button>
-                <Button variant="outline" size="sm" onClick={() => addAction('notify')}>+ Notify Email</Button>
               </div>
             </div>
 
-            {/* Step 4: Retry */}
-            <div className="space-y-3">
-              <h4 className="font-display font-semibold text-sm text-primary">Step 4 - Retry Settings</h4>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2"><Label>Retry on failure:</Label><Switch checked={retryEnabled} onCheckedChange={setRetryEnabled} /></div>
-                {retryEnabled && (
-                  <>
-                    <div className="flex items-center gap-2"><Label>Max:</Label>
-                      <Select value={maxRetries.toString()} onValueChange={v => setMaxRetries(Number(v))}>
-                        <SelectTrigger className="w-16 h-8"><SelectValue /></SelectTrigger>
-                        <SelectContent><SelectItem value="1">1</SelectItem><SelectItem value="2">2</SelectItem><SelectItem value="3">3</SelectItem></SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-2"><Label>After:</Label>
-                      <Select value={retryAfter} onValueChange={setRetryAfter}>
-                        <SelectTrigger className="w-28 h-8"><SelectValue /></SelectTrigger>
-                        <SelectContent><SelectItem value="5min">5 min</SelectItem><SelectItem value="15min">15 min</SelectItem><SelectItem value="1hr">1 hour</SelectItem></SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowBuilder(false)}>Cancel</Button>

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { 
@@ -103,12 +103,12 @@ export function ContactsView({ universities }: ContactsViewProps) {
     setLoading(true);
     try {
       // Fetch stages once
-      const stagesRes = await supabase.from('pipeline_stages').select('*').order('sort_order');
+      const stagesRes = await api.from('pipeline_stages').select('*').order('sort_order');
       const stagesData = stagesRes.data || [];
       setStages(stagesData);
 
       // Build query with server-side filters and pagination
-      let query = supabase.from('crm_contacts').select('*', { count: 'exact' });
+      let query = api.from('crm_contacts').select('*', { count: 'exact' });
       
       if (stageFilter !== 'all') query = query.eq('stage_id', stageFilter);
       if (universityFilter !== 'all') query = query.eq('university_id', universityFilter);
@@ -148,7 +148,7 @@ export function ContactsView({ universities }: ContactsViewProps) {
     try {
       const defaultStage = stages.find(s => s.is_default) || stages[0];
       
-      const { error } = await supabase.from('crm_contacts').insert({
+      const { error } = await api.from('crm_contacts').insert({
         name: newContact.name,
         email: newContact.email || null,
         mobile: newContact.mobile,
@@ -175,7 +175,7 @@ export function ContactsView({ universities }: ContactsViewProps) {
 
   const updateContactStage = async (contactId: string, stageId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('crm_contacts')
         .update({ stage_id: stageId, updated_at: new Date().toISOString() })
         .eq('id', contactId);
@@ -501,11 +501,11 @@ export function ContactsView({ universities }: ContactsViewProps) {
                               try {
                                 // Delete related data first
                                 await Promise.allSettled([
-                                  supabase.from('crm_activities').delete().eq('contact_id', contact.id),
-                                  supabase.from('crm_tasks').delete().eq('contact_id', contact.id),
-                                  supabase.from('lead_events').delete().eq('contact_id', contact.id),
+                                  api.from('crm_activities').delete().eq('contact_id', contact.id),
+                                  api.from('crm_tasks').delete().eq('contact_id', contact.id),
+                                  api.from('lead_events').delete().eq('contact_id', contact.id),
                                 ]);
-                                const { error } = await supabase.from('crm_contacts').delete().eq('id', contact.id);
+                                const { error } = await api.from('crm_contacts').delete().eq('id', contact.id);
                                 if (error) throw error;
                                 toast({ title: 'Deleted', description: 'Contact removed' });
                                 fetchData();

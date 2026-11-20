@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 
 interface FeatureToggle {
   feature_key: string;
@@ -12,7 +12,7 @@ export function useFeatureToggles() {
   const { data: toggles = [], isLoading } = useQuery({
     queryKey: ['feature-toggles'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('feature_toggles')
         .select('feature_key, label, parent_key, is_enabled');
       if (error) throw error;

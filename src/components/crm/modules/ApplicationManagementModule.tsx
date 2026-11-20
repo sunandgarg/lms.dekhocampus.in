@@ -1,7 +1,7 @@
 import { useState, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { 
   ArrowLeft, ClipboardList, FileText, CheckSquare, Search,
   MoreVertical, Eye, Loader2
@@ -25,7 +25,7 @@ export function ApplicationManagementModule() {
   const { data: forms = [], isLoading: formsLoading } = useQuery({
     queryKey: ['lead-capture-forms'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('lead_capture_forms')
         .select('*')
         .order('created_at', { ascending: false });
@@ -38,7 +38,7 @@ export function ApplicationManagementModule() {
   const { data: submissions = [], isLoading: subsLoading } = useQuery({
     queryKey: ['form-submissions-all'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('form_submissions')
         .select('*, lead_capture_forms(name)')
         .order('created_at', { ascending: false })

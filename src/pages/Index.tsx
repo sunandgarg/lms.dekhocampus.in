@@ -15,7 +15,7 @@ import { ApiConnectionsPage } from '@/components/lms/ApiConnectionsPage';
 import { AdPlatformsPage } from '@/components/lms/AdPlatformsPage';
 import { AutomationRulesPage } from '@/components/lms/AutomationRulesPage';
 import { TelecallerManagement } from '@/components/telecaller/TelecallerManagement';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
@@ -200,7 +200,7 @@ const Index = () => {
 
   const fetchUniversities = useCallback(async () => {
     try {
-      const { data: unis, error } = await supabase
+      const { data: unis, error } = await api
         .from('universities')
         .select(LIGHTWEIGHT_UNIVERSITY_COLUMNS)
         .order('created_at', { ascending: false });
@@ -211,16 +211,16 @@ const Index = () => {
       const uniIds = (unis || []).map(u => u.id);
       
       const [programsRes, stateCitiesRes, coursesRes, customColumnsRes] = await Promise.all([
-        supabase.from('programs').select('name, university_id').in('university_id', uniIds),
-        supabase.from('state_cities').select('state, city, university_id').in('university_id', uniIds),
-        supabase.from('course_specializations').select('course, specialization, university_id').in('university_id', uniIds),
-        supabase.from('custom_columns').select('id, column_name, column_key, is_required, sort_order, university_id').in('university_id', uniIds).order('sort_order'),
+        api.from('programs').select('name, university_id').in('university_id', uniIds),
+        api.from('state_cities').select('state, city, university_id').in('university_id', uniIds),
+        api.from('course_specializations').select('course, specialization, university_id').in('university_id', uniIds),
+        api.from('custom_columns').select('id, column_name, column_key, is_required, sort_order, university_id').in('university_id', uniIds).order('sort_order'),
       ]);
 
       // Fetch custom column values
       const columnIds = (customColumnsRes.data || []).map(c => c.id);
       const { data: columnValues } = columnIds.length > 0 
-        ? await supabase.from('custom_column_values').select('value, parent_value_id, column_id').in('column_id', columnIds)
+        ? await api.from('custom_column_values').select('value, parent_value_id, column_id').in('column_id', columnIds)
         : { data: [] };
 
       // Group data by university ID
@@ -298,7 +298,7 @@ const Index = () => {
     if (!force && hasUniversityDetails(current)) return current;
     if (!force && hasUniversityDetails(selected)) return selected;
 
-    const { data, error } = await supabase
+    const { data, error } = await api
       .from('universities')
       .select(force ? '*' : UNIVERSITY_DETAIL_COLUMNS)
       .eq('id', id)
@@ -317,7 +317,7 @@ const Index = () => {
 
   const fetchLogs = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('upload_batches')
         .select('id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, created_at, completed_at, user_id')
         .order('created_at', { ascending: false })
@@ -361,15 +361,15 @@ const Index = () => {
           await withTimeout(
             fetchUniversities(),
             INITIAL_LOAD_TIMEOUT_MS,
-            'Supabase did not respond within 15 seconds.',
+            'The LMS server did not respond within 15 seconds.',
           );
         }
       } catch (error) {
         console.error('Initial data load failed:', error);
-        setStartupError(error instanceof Error ? error.message : 'Could not load data from Supabase.');
+        setStartupError(error instanceof Error ? error.message : 'Could not load LMS data.');
       } finally {
         // Never leave the whole application behind an infinite loading screen.
-        // Users can still navigate and retry if Supabase or the network is unavailable.
+        // Users can still navigate and retry if the server or network is unavailable.
         setLoading(false);
       }
     };
@@ -383,11 +383,11 @@ const Index = () => {
       await withTimeout(
         fetchUniversities(),
         INITIAL_LOAD_TIMEOUT_MS,
-        'Supabase did not respond within 15 seconds.',
+        'The LMS server did not respond within 15 seconds.',
       );
     } catch (error) {
       console.error('Data reload failed:', error);
-      setStartupError(error instanceof Error ? error.message : 'Could not load data from Supabase.');
+      setStartupError(error instanceof Error ? error.message : 'Could not load LMS data.');
     }
   }, [fetchUniversities]);
 
@@ -411,7 +411,7 @@ const Index = () => {
 
   const handleAddUniversity = async (formData: UniversityFormData) => {
     try {
-      const { data: newUni, error } = await supabase
+      const { data: newUni, error } = await api
         .from('universities')
         .insert({
           name: formData.name,
@@ -444,24 +444,24 @@ const Index = () => {
       if (error) throw error;
 
       if (formData.programs.length > 0) {
-        await supabase.from('programs').insert(
+        await api.from('programs').insert(
           formData.programs.map(name => ({ university_id: newUni.id, name }))
         );
       }
       if (formData.stateCities.length > 0) {
-        await supabase.from('state_cities').insert(
+        await api.from('state_cities').insert(
           formData.stateCities.map(sc => ({ university_id: newUni.id, state: sc.state, city: sc.city }))
         );
       }
       if (formData.courseSpecializations.length > 0) {
-        await supabase.from('course_specializations').insert(
+        await api.from('course_specializations').insert(
           formData.courseSpecializations.map(cs => ({ university_id: newUni.id, course: cs.course, specialization: cs.specialization }))
         );
       }
 
       if (formData.customColumns && formData.customColumns.length > 0) {
         for (const col of formData.customColumns) {
-          const { data: columnData, error: colError } = await supabase
+          const { data: columnData, error: colError } = await api
             .from('custom_columns')
             .insert({
               university_id: newUni.id,
@@ -476,7 +476,7 @@ const Index = () => {
           if (colError) throw colError;
 
           if (col.values.length > 0) {
-            await supabase.from('custom_column_values').insert(
+            await api.from('custom_column_values').insert(
               col.values.map(v => ({
                 university_id: newUni.id,
                 column_id: columnData.id,
@@ -549,7 +549,7 @@ const Index = () => {
 
   const handleSaveEdit = async (formData: UniversityEditData) => {
     try {
-      const { data: savedUniversity, error } = await supabase
+      const { data: savedUniversity, error } = await api
         .from('universities')
         .update({
           name: formData.name,
@@ -584,26 +584,26 @@ const Index = () => {
       if (error) throw error;
 
       const relatedDeletes = await Promise.all([
-        supabase.from('programs').delete().eq('university_id', formData.id),
-        supabase.from('state_cities').delete().eq('university_id', formData.id),
-        supabase.from('course_specializations').delete().eq('university_id', formData.id),
+        api.from('programs').delete().eq('university_id', formData.id),
+        api.from('state_cities').delete().eq('university_id', formData.id),
+        api.from('course_specializations').delete().eq('university_id', formData.id),
       ]);
       relatedDeletes.forEach(({ error }) => { if (error) throw error; });
 
       if (formData.programs.length > 0) {
-        const { error } = await supabase.from('programs').insert(
+        const { error } = await api.from('programs').insert(
           formData.programs.map(name => ({ university_id: formData.id, name }))
         );
         if (error) throw error;
       }
       if (formData.stateCities.length > 0) {
-        const { error } = await supabase.from('state_cities').insert(
+        const { error } = await api.from('state_cities').insert(
           formData.stateCities.map(sc => ({ university_id: formData.id, state: sc.state, city: sc.city }))
         );
         if (error) throw error;
       }
       if (formData.courseSpecializations.length > 0) {
-        const { error } = await supabase.from('course_specializations').insert(
+        const { error } = await api.from('course_specializations').insert(
           formData.courseSpecializations.map(cs => ({ university_id: formData.id, course: cs.course, specialization: cs.specialization }))
         );
         if (error) throw error;
@@ -645,12 +645,12 @@ const Index = () => {
     
     try {
       await Promise.all([
-        supabase.from('programs').delete().eq('university_id', id),
-        supabase.from('state_cities').delete().eq('university_id', id),
-        supabase.from('course_specializations').delete().eq('university_id', id),
+        api.from('programs').delete().eq('university_id', id),
+        api.from('state_cities').delete().eq('university_id', id),
+        api.from('course_specializations').delete().eq('university_id', id),
       ]);
 
-      const { error } = await supabase
+      const { error } = await api
         .from('universities')
         .delete()
         .eq('id', id);
@@ -670,12 +670,12 @@ const Index = () => {
 
     try {
       await Promise.all([
-        supabase.from('programs').delete().in('university_id', uniqueIds),
-        supabase.from('state_cities').delete().in('university_id', uniqueIds),
-        supabase.from('course_specializations').delete().in('university_id', uniqueIds),
+        api.from('programs').delete().in('university_id', uniqueIds),
+        api.from('state_cities').delete().in('university_id', uniqueIds),
+        api.from('course_specializations').delete().in('university_id', uniqueIds),
       ]);
 
-      const { error } = await supabase
+      const { error } = await api
         .from('universities')
         .delete()
         .in('id', uniqueIds);
@@ -752,7 +752,7 @@ const Index = () => {
       const failures: string[] = [];
       for (const cfg of configs) {
         if (!cfg?.name) { failures.push('(unnamed)'); continue; }
-        const { data: newUni, error } = await supabase
+        const { data: newUni, error } = await api
           .from('universities')
           .insert(buildRow(cfg))
           .select()
@@ -766,23 +766,23 @@ const Index = () => {
 
         // Related tables
         if (cfg.programs?.length > 0) {
-          await supabase.from('programs').insert(
+          await api.from('programs').insert(
             cfg.programs.map((name: string) => ({ university_id: newUni.id, name }))
           );
         }
         if (cfg.stateCities?.length > 0) {
-          await supabase.from('state_cities').insert(
+          await api.from('state_cities').insert(
             cfg.stateCities.map((sc: any) => ({ university_id: newUni.id, state: sc.state, city: sc.city }))
           );
         }
         if (cfg.courseSpecializations?.length > 0) {
-          await supabase.from('course_specializations').insert(
+          await api.from('course_specializations').insert(
             cfg.courseSpecializations.map((cs: any) => ({ university_id: newUni.id, course: cs.course, specialization: cs.specialization }))
           );
         }
         if (cfg.customColumns?.length > 0) {
           for (const col of cfg.customColumns) {
-            const { data: columnData, error: colError } = await supabase
+            const { data: columnData, error: colError } = await api
               .from('custom_columns')
               .insert({
                 university_id: newUni.id,
@@ -794,7 +794,7 @@ const Index = () => {
               .select()
               .single();
             if (!colError && col.values?.length > 0) {
-              await supabase.from('custom_column_values').insert(
+              await api.from('custom_column_values').insert(
                 col.values.map((v: any) => ({
                   university_id: newUni.id,
                   column_id: columnData.id,
@@ -835,7 +835,7 @@ const Index = () => {
 
       {startupError && (
         <div className="mx-4 mt-4 flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
-          <span>Could not load Supabase data: {startupError}</span>
+          <span>Could not load LMS data: {startupError}</span>
           <Button variant="outline" size="sm" onClick={retryInitialLoad}>
             Retry
           </Button>

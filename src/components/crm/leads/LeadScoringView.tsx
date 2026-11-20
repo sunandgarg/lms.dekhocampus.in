@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Plus, 
@@ -75,7 +75,7 @@ export function LeadScoringView() {
 
   const fetchRules = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('lead_scoring_rules')
         .select('*')
         .order('created_at', { ascending: false });
@@ -96,7 +96,7 @@ export function LeadScoringView() {
     }
 
     try {
-      const { error } = await supabase.from('lead_scoring_rules').insert({
+      const { error } = await api.from('lead_scoring_rules').insert({
         name: newRule.name,
         description: newRule.description || null,
         category: newRule.category,
@@ -128,7 +128,7 @@ export function LeadScoringView() {
 
   const toggleRuleActive = async (ruleId: string, isActive: boolean) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('lead_scoring_rules')
         .update({ is_active: isActive })
         .eq('id', ruleId);
@@ -143,7 +143,7 @@ export function LeadScoringView() {
 
   const deleteRule = async (ruleId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('lead_scoring_rules')
         .delete()
         .eq('id', ruleId);

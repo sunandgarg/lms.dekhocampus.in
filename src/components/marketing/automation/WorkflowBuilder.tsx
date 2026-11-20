@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,7 +47,7 @@ export function WorkflowBuilder() {
   const { data: workflows = [], isLoading } = useQuery({
     queryKey: ['marketing-workflows'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_workflows')
         .select('*')
         .order('created_at', { ascending: false });
@@ -73,7 +73,7 @@ export function WorkflowBuilder() {
         },
       ];
 
-      const { data: result, error } = await supabase
+      const { data: result, error } = await api
         .from('marketing_workflows')
         .insert([{
           name: data.name,
@@ -128,7 +128,7 @@ export function WorkflowBuilder() {
       { id: `edge-${Date.now()}`, source: lastNode.id, target: newNode.id }
     ] : selectedWorkflow.edges;
 
-    const { error } = await supabase
+    const { error } = await api
       .from('marketing_workflows')
       .update({ nodes: updatedNodes as any, edges: updatedEdges as any })
       .eq('id', selectedWorkflow.id);
@@ -155,7 +155,7 @@ export function WorkflowBuilder() {
       e => e.source !== nodeId && e.target !== nodeId
     );
 
-    const { error } = await supabase
+    const { error } = await api
       .from('marketing_workflows')
       .update({ nodes: updatedNodes as any, edges: updatedEdges as any })
       .eq('id', selectedWorkflow.id);
@@ -173,7 +173,7 @@ export function WorkflowBuilder() {
   // Update workflow status
   const updateStatus = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_workflows')
         .update({ status })
         .eq('id', id);

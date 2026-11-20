@@ -39,7 +39,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { supabase, supabaseProjectUrl } from '@/integrations/supabase/client';
+import { api, apiBaseUrl } from '@/integrations/api/client';
 
 interface LandingPage {
   id: string;
@@ -60,7 +60,7 @@ interface Props {
   universities: any[];
 }
 
-const RECEIVE_URL = `${supabaseProjectUrl}/functions/v1/receive-lead`;
+const RECEIVE_URL = `${apiBaseUrl}/api/inbound/lead`;
 
 export function LandingPagesView({ universities }: Props) {
   const navigate = useNavigate();
@@ -78,8 +78,8 @@ export function LandingPagesView({ universities }: Props) {
   const reload = useCallback(async () => {
     setLoading(true);
     const [pRes, prRes] = await Promise.all([
-      supabase.from('landing_pages').select('*').order('created_at', { ascending: false }),
-      supabase.from('multi_push_presets').select('id, name, university_ids'),
+      api.from('landing_pages').select('*').order('created_at', { ascending: false }),
+      api.from('multi_push_presets').select('id, name, university_ids'),
     ]);
     setPages((pRes.data as any) || []);
     setPresets(prRes.data || []);
@@ -96,13 +96,13 @@ export function LandingPagesView({ universities }: Props) {
   };
 
   const toggleActive = async (lp: LandingPage) => {
-    await supabase.from('landing_pages').update({ is_active: !lp.is_active }).eq('id', lp.id);
+    await api.from('landing_pages').update({ is_active: !lp.is_active }).eq('id', lp.id);
     reload();
   };
 
   const deletePage = async (lp: LandingPage) => {
     if (!confirm(`Delete landing page "${lp.name}"? Its API key will stop working.`)) return;
-    await supabase.from('landing_pages').delete().eq('id', lp.id);
+    await api.from('landing_pages').delete().eq('id', lp.id);
     reload();
   };
 
@@ -111,7 +111,7 @@ export function LandingPagesView({ universities }: Props) {
     const newKey = Array.from(crypto.getRandomValues(new Uint8Array(24)))
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
-    await supabase.from('landing_pages').update({ api_key: newKey }).eq('id', lp.id);
+    await api.from('landing_pages').update({ api_key: newKey }).eq('id', lp.id);
     reload();
     toast({ title: 'Key rotated', description: 'Update your landing page with the new key.' });
   };
@@ -340,8 +340,8 @@ function LandingPageDialog({
       default_values: defaults,
     };
     const { error } = editing
-      ? await supabase.from('landing_pages').update(row).eq('id', editing.id)
-      : await supabase.from('landing_pages').insert(row);
+      ? await api.from('landing_pages').update(row).eq('id', editing.id)
+      : await api.from('landing_pages').insert(row);
     setSaving(false);
     if (error) {
       toast({ title: 'Save failed', description: error.message, variant: 'destructive' });

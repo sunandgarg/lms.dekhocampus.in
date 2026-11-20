@@ -31,11 +31,11 @@ import { LeadPreviewTable } from "./LeadPreviewTable";
 import { UniversityInfoPanel } from "./UniversityInfoPanel";
 import { SingleLeadForm } from "./SingleLeadForm";
 import { Alert } from "../Alert";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/integrations/api/client";
 import { useUploadStatePersistence } from "@/hooks/useUploadStatePersistence";
 import { appCache } from "@/hooks/useAppCache";
-import { isMappedCanonicalDuplicate } from "../../../supabase/functions/_shared/canonicalPayload";
-import { normalizeAmityExternalPartnerPayload } from "../../../supabase/functions/_shared/amityExternalPartner";
+import { isMappedCanonicalDuplicate } from "@/lib/lead/canonicalPayload";
+import { normalizeAmityExternalPartnerPayload } from "@/lib/lead/amityExternalPartner";
 
 interface CustomColumn {
   columnKey: string;
@@ -231,7 +231,7 @@ function normalizeOptionValues(value: unknown): Array<{ value: string; parentVal
 
       return parentCandidate ? { value: valueCandidate, parentValue: parentCandidate } : { value: valueCandidate };
     })
-    .filter((entry): entry is { value: string; parentValue?: string } => Boolean(entry));
+    .filter(Boolean) as Array<{ value: string; parentValue?: string }>;
 }
 
 function normalizeCustomColumns(value: unknown): CustomColumn[] {
@@ -254,7 +254,7 @@ function normalizeCustomColumns(value: unknown): CustomColumn[] {
         apiFieldName: String(record.apiFieldName ?? record.api_field_name ?? "").trim() || undefined,
       } satisfies CustomColumn;
     })
-    .filter((entry): entry is CustomColumn => Boolean(entry));
+    .filter(Boolean) as CustomColumn[];
 }
 
 function normalizeStateCities(value: unknown): Array<{ state: string; city: string }> {
@@ -698,13 +698,13 @@ export function UploadLeadsTab({
     isPollingInFlightRef.current = true;
 
     try {
-      const { data: batch } = await supabase
+      const { data: batch } = await api
         .from("upload_batches")
         .select("success_count, duplicate_count, fail_count, status, is_paused, is_cancelled, total_leads")
         .eq("id", pollBatchId)
         .maybeSingle();
 
-      if (!batch) return;
+    if (!batch) return;
 
       setIsPaused(Boolean(batch.is_paused));
 
@@ -714,6 +714,7 @@ export function UploadLeadsTab({
       const isBatchComplete =
         batch.status === "completed" ||
         batch.status === "cancelled" ||
+        batch.status === "failed" ||
         (processed >= (batch.total_leads ?? 0) && (batch.total_leads ?? 0) > 0);
 
       if (isBatchComplete) {
@@ -728,9 +729,11 @@ export function UploadLeadsTab({
         const success = batch.success_count ?? 0;
         const failed = (batch.fail_count ?? 0) + (batch.duplicate_count ?? 0);
         setAlert({
-          type: batch.status === "cancelled" ? "info" : failed === 0 ? "success" : "info",
+          type: batch.status === "failed" ? "error" : batch.status === "cancelled" ? "info" : failed === 0 ? "success" : "info",
           message:
-            batch.status === "cancelled"
+            batch.status === "failed"
+              ? "Processing stopped. Review the batch history and transaction archive before retrying."
+              : batch.status === "cancelled"
               ? "Processing was cancelled."
               : `Processing complete! Success: ${success}, Failed: ${failed}`,
         });
@@ -1744,7 +1747,7 @@ export function UploadLeadsTab({
 
     setIsCheckingDuplicates(true);
     try {
-      const { emails, mobiles } = await checkDatabaseDuplicates(leads, selectedUniversity.id, supabase);
+      const { emails, mobiles } = await checkDatabaseDuplicates(leads, selectedUniversity.id, api);
 
       const duplicateIndices = new Set<number>();
       leads.forEach((lead, index) => {
@@ -1829,11 +1832,11 @@ export function UploadLeadsTab({
     URL.revokeObjectURL(url);
   };
 
-  const createBatch = async (status: string = "processing") => {
+  const createBatch = async (status: string = "uploading") => {
     if (!selectedUniversity?.detailsLoaded) return null;
 
     // Don't save CSV data to reduce storage usage
-    const { data, error } = await supabase
+    const { data, error } = await api
       .from("upload_batches")
       .insert({
         university_id: selectedUniversity.id,
@@ -1868,8 +1871,9 @@ export function UploadLeadsTab({
       message: `Processing ${leads.length} leads (${pushConcurrency} at a time)...`,
     });
 
+    let newBatchId: string | null = null;
     try {
-      const newBatchId = await createBatch("processing");
+      newBatchId = await createBatch("uploading");
       if (!newBatchId) {
         setAlert({ type: "error", message: "Failed to create batch" });
         setIsProcessing(false);
@@ -1878,97 +1882,57 @@ export function UploadLeadsTab({
       }
       setBatchId(newBatchId);
 
-      const apiConfig = getApiConfig();
-      const statuses = new Map<number, LeadProcessingStatus>();
-      const responses = new Map<number, string>();
-      let processed = 0;
-      let nextLeadIndex = 0;
-      const workerCount = Math.min(pushConcurrency, leads.length);
-      // Claim one lead per worker so Pause takes effect after only the currently
-      // active request (at most pushConcurrency leads), never a hidden packet.
-      const packetSize = 1;
-
-      // Each worker still sends exactly one lead per request. The per-run control
-      // only changes how many independent requests may be in flight together.
-      const leadWorker = async () => {
-        while (processingRef.current) {
-          while (pausedRef.current && processingRef.current) {
-            await new Promise((resolve) => setTimeout(resolve, 250));
-          }
-          if (!processingRef.current) return;
-
-          const packetStart = nextLeadIndex;
-          if (packetStart >= leads.length) return;
-          nextLeadIndex = Math.min(nextLeadIndex + packetSize, leads.length);
-          const packet = leads
-            .slice(packetStart, nextLeadIndex)
-            .map((lead, offset) => ({ lead, index: packetStart + offset }));
-
-          packet.forEach(({ index }) => {
-            statuses.set(index, "pending");
-            responses.set(index, "Waiting for partner response...");
-          });
-          setLeadStatuses(new Map(statuses));
-          setLeadResponses(new Map(responses));
-
-          const controller = new AbortController();
-          activePacketControllersRef.current.add(controller);
-          const results = await processLeadPacket(packet, newBatchId, apiConfig, controller.signal);
-          activePacketControllersRef.current.delete(controller);
-
-          // Stop starts a new run generation and aborts active requests. Never
-          // let late responses mutate progress or produce a false completion.
-          if (runId !== activeRunIdRef.current || !processingRef.current || controller.signal.aborted) return;
-          packet.forEach(({ index }, resultIndex) => {
-            const result = results[resultIndex];
-            const status: LeadProcessingStatus =
-              result.status === "Success" ? "success" : result.status === "Duplicate" ? "duplicate" : "failed";
-            statuses.set(index, status);
-            responses.set(index, result.response);
-          });
-
-          processed += packet.length;
-          currentIndexRef.current = processed;
-          setLeadStatuses(new Map(statuses));
-          setLeadResponses(new Map(responses));
-          setProcessedCount(processed);
-        }
-      };
-
-      await Promise.all(Array.from({ length: workerCount }, () => leadWorker()));
-
-      if (runId !== activeRunIdRef.current || !processingRef.current) return;
-
-      // Ensure partial final groups are always visible.
-      setLeadStatuses(new Map(statuses));
-      setLeadResponses(new Map(responses));
-      setProcessedCount(processed);
-
-      // Mark batch complete
-      if (processingRef.current) {
-        await supabase
-          .from("upload_batches")
-          .update({
-            status: "completed",
-            completed_at: new Date().toISOString(),
-            processed_count: processed,
-          })
-          .eq("id", newBatchId);
+      if (csvData) {
+        const originalResponse = await fetch(`/api/batches/${newBatchId}/source`, {
+          method: 'POST', headers: { 'Content-Type': 'text/csv',
+            'X-Filename': `original-${fileName || 'upload.csv'}`.replace(/[^\x20-\x7e]/g, '_') }, body: csvData,
+        });
+        if (!originalResponse.ok) throw new Error('Could not archive the original file. No leads were sent.');
+      }
+      const sourceCsv = generateLeadsCSV(leads);
+      const sourceResponse = await fetch(`/api/batches/${newBatchId}/source`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv', 'X-Filename': 'processed-leads.csv' },
+        body: sourceCsv,
+      });
+      if (!sourceResponse.ok) {
+        await api.from('upload_batches').update({ status: 'failed', error_message: 'Could not archive source CSV' }).eq('id', newBatchId);
+        throw new Error('Could not archive the source CSV. No leads were sent.');
       }
 
-      processingRef.current = false;
-      setIsProcessing(false);
-
-      const successCount = [...statuses.values()].filter((s) => s === "success").length;
-      const failCount = [...statuses.values()].filter((s) => s === "failed").length;
-      const dupCount = [...statuses.values()].filter((s) => s === "duplicate").length;
-
-      setAlert({
-        type: failCount === 0 ? "success" : "info",
-        message: `Complete! Success: ${successCount}, Failed: ${failCount}, Duplicate: ${dupCount}`,
+      const mapping = getApiConfig();
+      if (!mapping) throw new Error('University configuration is unavailable');
+      const apiConfig = { columnMapping: mapping.columnMapping,
+        customColumnMapping: mapping.customColumnMapping, apiTimeoutSeconds: mapping.apiTimeoutSeconds };
+      for (let start = 0; start < leads.length; start += 50) {
+        const tasks = leads.slice(start, start + 50).map((lead, offset) => ({
+          index: start + offset,
+          apiConfig,
+          leadData: {
+            ...lead,
+            leadSource: lead.leadSource || selectedUniversity.source,
+            leadMedium: lead.leadMedium || selectedUniversity.medium,
+            leadCampaign: lead.leadCampaign || selectedUniversity.campaign,
+          },
+        }));
+        const queued = await fetch(`/api/batches/${newBatchId}/queue`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tasks }),
+        });
+        if (!queued.ok) throw new Error('Could not save all leads to the server queue. No leads were sent.');
+      }
+      const final = await fetch(`/api/batches/${newBatchId}/queue`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ finalize: true }),
       });
+      if (!final.ok) throw new Error('Could not start the server queue. No leads were sent.');
+      setIsBackgroundPolling(true);
+      setAlert({ type: 'info', message: `Queued ${leads.length} leads. Processing will continue if you close this page.` });
     } catch (error) {
       console.error("Processing error:", error);
+      if (newBatchId) {
+        await api.from('upload_batches').update({ status: 'failed', error_message: String(error) }).eq('id', newBatchId);
+      }
       setAlert({
         type: "error",
         message: error instanceof Error ? error.message : `Processing failed: ${String(error)}`,
@@ -2061,7 +2025,7 @@ export function UploadLeadsTab({
     try {
       const apiConfig = precomputedApiConfig || getApiConfig();
 
-      const { data, error } = await supabase.functions.invoke("process-lead", {
+      const { data, error } = await api.functions.invoke("process-lead", {
         body: {
           universityId: selectedUniversity.id,
           batchId: batchIdParam,
@@ -2119,7 +2083,7 @@ export function UploadLeadsTab({
     }));
 
     try {
-      const { data, error } = await supabase.functions.invoke("process-lead", {
+      const { data, error } = await api.functions.invoke("process-lead", {
         body: { tasks, concurrency: 1 },
         signal,
       });
@@ -2137,13 +2101,12 @@ export function UploadLeadsTab({
       if (signal?.aborted) {
         return packet.map(() => ({ success: false, status: "Cancelled", response: "Processing stopped" }));
       }
-      console.error("Process lead packet error:", error);
-      return packet.map(() => ({ success: false, status: "Fail", response: String(error) }));
+      throw error;
     }
   };
 
   const checkBatchStatus = async (batchIdToCheck: string): Promise<{ isPaused: boolean; isCancelled: boolean }> => {
-    const { data } = await supabase
+    const { data } = await api
       .from("upload_batches")
       .select("is_paused, is_cancelled")
       .eq("id", batchIdToCheck)
@@ -2187,7 +2150,7 @@ export function UploadLeadsTab({
     setIsPaused(true);
     setAlert({ type: "info", message: "Processing paused. Click resume to continue." });
     if (batchId) {
-      supabase.from("upload_batches").update({ is_paused: true, status: "paused" }).eq("id", batchId).then();
+      api.from("upload_batches").update({ is_paused: true, status: "paused" }).eq("id", batchId).then();
     }
   };
 
@@ -2196,7 +2159,7 @@ export function UploadLeadsTab({
     setIsPaused(false);
     setAlert(null);
     if (batchId) {
-      await supabase.from("upload_batches").update({ is_paused: false, status: "processing" }).eq("id", batchId);
+      await api.from("upload_batches").update({ is_paused: false, status: "processing" }).eq("id", batchId);
     }
   };
 
@@ -2215,7 +2178,7 @@ export function UploadLeadsTab({
     }
     setAlert({ type: "info", message: "Processing stopped. Remaining leads cancelled." });
     if (batchId) {
-      supabase.from("upload_batches").update({ status: "cancelled", is_cancelled: true }).eq("id", batchId).then();
+      api.from("upload_batches").update({ status: "cancelled", is_cancelled: true }).eq("id", batchId).then();
     }
   };
 

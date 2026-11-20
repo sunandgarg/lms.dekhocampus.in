@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Plus, 
@@ -65,7 +65,7 @@ export function PipelineView({ universities }: PipelineViewProps) {
 
   const fetchData = async () => {
     try {
-      const stagesRes = await supabase.from('pipeline_stages').select('*').order('sort_order');
+      const stagesRes = await api.from('pipeline_stages').select('*').order('sort_order');
       setStages(stagesRes.data || []);
       
       // Fetch contacts in batches to bypass 1000-row limit
@@ -73,7 +73,7 @@ export function PipelineView({ universities }: PipelineViewProps) {
       let from = 0;
       const batchSize = 1000;
       while (true) {
-        const { data, error } = await supabase
+        const { data, error } = await api
           .from('crm_contacts')
           .select('id, name, email, mobile, course, stage_id, priority, created_at')
           .order('created_at', { ascending: false })
@@ -107,7 +107,7 @@ export function PipelineView({ universities }: PipelineViewProps) {
 
     try {
       const newStageId = stageId || null;
-      const { error } = await supabase
+      const { error } = await api
         .from('crm_contacts')
         .update({ stage_id: newStageId, updated_at: new Date().toISOString() })
         .eq('id', draggedContact.id);
@@ -119,7 +119,7 @@ export function PipelineView({ universities }: PipelineViewProps) {
       ));
 
       // Log activity
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: draggedContact.id,
         type: 'stage_change',
         title: 'Stage Changed',
@@ -149,7 +149,7 @@ export function PipelineView({ universities }: PipelineViewProps) {
       return;
     }
     try {
-      const { error } = await supabase.from('pipeline_stages').delete().eq('id', stageId);
+      const { error } = await api.from('pipeline_stages').delete().eq('id', stageId);
       if (error) throw error;
       toast({ title: 'Stage deleted' });
       fetchData();
@@ -165,7 +165,7 @@ export function PipelineView({ universities }: PipelineViewProps) {
     try {
       if (editingStage) {
         // Update existing stage
-        const { error } = await supabase.from('pipeline_stages').update({
+        const { error } = await api.from('pipeline_stages').update({
           name: newStageName,
           color: newStageColor,
         }).eq('id', editingStage.id);
@@ -174,7 +174,7 @@ export function PipelineView({ universities }: PipelineViewProps) {
       } else {
         // Add new stage
         const maxOrder = Math.max(...stages.map(s => s.sort_order), 0);
-        const { error } = await supabase.from('pipeline_stages').insert({
+        const { error } = await api.from('pipeline_stages').insert({
           name: newStageName,
           color: newStageColor,
           sort_order: maxOrder + 1,

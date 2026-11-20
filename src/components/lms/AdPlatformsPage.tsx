@@ -10,13 +10,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { Copy, CheckCircle2, Loader2, RefreshCw, Trash2, Settings2, ArrowRight, ArrowLeft, Zap, Megaphone, BarChart3, Globe, Users, Target, Shield } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 
-const SUPABASE_PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-
-function getWebhookUrl(functionName: string, universityId?: string) {
-  const base = `https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/${functionName}`;
-  return universityId ? `${base}?university_id=${universityId}` : base;
+function getWebhookUrl(functionName: string, universityId?: string, key?: string) {
+  const base = `${window.location.origin}/api/webhooks/${functionName}`;
+  const params = new URLSearchParams();
+  if (universityId) params.set('university_id', universityId);
+  if (key) params.set('key', key);
+  return params.size ? `${base}?${params}` : base;
 }
 
 interface UniversityOption { id: string; name: string; }
@@ -214,14 +215,14 @@ export function AdPlatformsPage() {
     setLoading(true);
     try {
       const [uniRes, logsRes] = await Promise.all([
-        supabase.from('universities').select('id, name').order('name'),
-        supabase.from('api_logs').select('id, university_id, source, campaign, status, email, mobile, created_at')
+        api.from('universities').select('id, name').order('name'),
+        api.from('api_logs').select('id, university_id, source, campaign, status, email, mobile, created_at')
           .in('source', ['Facebook Lead Ads', 'Google Lead Ads', 'Bing Lead Ads'])
           .order('created_at', { ascending: false }).limit(500),
       ]);
       if (uniRes.data) setUniversities(uniRes.data);
 
-      const { data: settingsData } = await supabase.from('app_settings').select('*').like('key', 'ad_integration_%');
+      const { data: settingsData } = await api.from('app_settings').select('*').like('key', 'ad_integration_%');
       const integrationList: Integration[] = [];
       if (settingsData) {
         for (const s of settingsData) {
@@ -245,7 +246,7 @@ export function AdPlatformsPage() {
               university_id: config.university_id || null,
               university_name: uni?.name || 'Not linked',
               is_active: config.is_active !== false,
-              webhook_url: getWebhookUrl(functionName, config.university_id || undefined),
+              webhook_url: getWebhookUrl(functionName, config.university_id || undefined, config.webhook_key),
               webhook_key: config.webhook_key || '',
               field_mapping: config.field_mapping || (platform === 'facebook' ? DEFAULT_FB_MAPPING : DEFAULT_GOOGLE_MAPPING),
               created_at: s.updated_at || '', leads_received: leadCount,
@@ -310,7 +311,7 @@ export function AdPlatformsPage() {
         field_mapping: setupMapping, webhook_key: generateKey(),
       };
       const key = `ad_integration_${setupPlatform}_${setupSubtype}_${Date.now()}`;
-      const { error } = await supabase.from('app_settings').insert({ key, value: JSON.stringify(config) });
+      const { error } = await api.from('app_settings').insert({ key, value: JSON.stringify(config) });
       if (error) throw error;
       toast({ title: 'Integration Created', description: `${setupName} connected successfully` });
       setShowSetup(false); fetchData();
@@ -321,7 +322,7 @@ export function AdPlatformsPage() {
 
   const deleteIntegration = async (id: string) => {
     if (!confirm('Remove this connected account?')) return;
-    await supabase.from('app_settings').delete().eq('id', id);
+    await api.from('app_settings').delete().eq('id', id);
     fetchData();
     toast({ title: 'Account Removed' });
   };
@@ -406,8 +407,8 @@ export function AdPlatformsPage() {
                 <div className="bg-muted/30 border border-border rounded-lg p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground w-24 shrink-0">Webhook Url :</span>
-                    <code className="text-sm font-mono flex-1 break-all">{getWebhookUrl('google-ads-webhook')}</code>
-                    <CopyBtn text={getWebhookUrl('google-ads-webhook')} field="google-webhook-url" />
+                    <code className="text-sm font-mono flex-1 break-all">{cardIntegrations[0]?.webhook_url || 'Create an integration to get a URL'}</code>
+                    {cardIntegrations[0] && <CopyBtn text={cardIntegrations[0].webhook_url} field="google-webhook-url" />}
                   </div>
                   {cardIntegrations.length > 0 && cardIntegrations[0].webhook_key && (
                     <div className="flex items-center gap-2">
@@ -531,12 +532,12 @@ export function AdPlatformsPage() {
               <div className="bg-muted/30 border border-border rounded-lg p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground w-24 shrink-0">Webhook Url :</span>
-                  <code className="text-sm font-mono flex-1 break-all">{getWebhookUrl('meta-ads-webhook')}</code>
-                  <CopyBtn text={getWebhookUrl('meta-ads-webhook')} field="fb-webhook-url" />
+                  <code className="text-sm font-mono flex-1 break-all">{cardIntegrations[0]?.webhook_url || 'Create an integration to get a URL'}</code>
+                  {cardIntegrations[0] && <CopyBtn text={cardIntegrations[0].webhook_url} field="fb-webhook-url" />}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground w-24 shrink-0">Verify Token :</span>
-                  <code className="text-sm font-mono">Set as META_VERIFY_TOKEN in Supabase secrets</code>
+                  <code className="text-sm font-mono">{cardIntegrations[0]?.webhook_key || 'Create an integration first'}</code>
                 </div>
               </div>
             </Card>
@@ -553,8 +554,8 @@ export function AdPlatformsPage() {
                 <div className="bg-muted/30 border border-border rounded-lg p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground w-24 shrink-0">Webhook Url :</span>
-                    <code className="text-sm font-mono flex-1 break-all">{getWebhookUrl('google-ads-webhook')}</code>
-                    <CopyBtn text={getWebhookUrl('google-ads-webhook')} field="bing-webhook-url" />
+                    <code className="text-sm font-mono flex-1 break-all">{cardIntegrations[0]?.webhook_url || 'Create an integration to get a URL'}</code>
+                    {cardIntegrations[0] && <CopyBtn text={cardIntegrations[0].webhook_url} field="bing-webhook-url" />}
                   </div>
                   {cardIntegrations.length > 0 && cardIntegrations[0].webhook_key && (
                     <div className="flex items-center gap-2">

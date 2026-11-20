@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
@@ -40,7 +40,7 @@ export function LeadAssignmentSelector({
 
   const fetchTeamMembers = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('team_members')
         .select('*')
         .eq('is_active', true)
@@ -63,7 +63,7 @@ export function LeadAssignmentSelector({
       const member = teamMembers.find(m => m.id === memberId);
       
       // Update contact
-      const { error } = await supabase
+      const { error } = await api
         .from('crm_contacts')
         .update({ 
           assigned_to: memberId || null,
@@ -75,7 +75,7 @@ export function LeadAssignmentSelector({
 
       // Log assignment history
       if (memberId) {
-        await supabase.from('lead_assignment_history').insert({
+        await api.from('lead_assignment_history').insert({
           contact_id: contactId,
           assigned_to: memberId,
           assigned_from: currentAssignee || null,
@@ -83,7 +83,7 @@ export function LeadAssignmentSelector({
         });
 
         // Log activity
-        await supabase.from('crm_activities').insert({
+        await api.from('crm_activities').insert({
           contact_id: contactId,
           type: 'assignment',
           title: `Assigned to ${member?.full_name}`,
@@ -92,7 +92,7 @@ export function LeadAssignmentSelector({
 
         // Update team member lead count
         if (member) {
-          await supabase
+          await api
             .from('team_members')
             .update({ current_lead_count: member.current_lead_count + 1 })
             .eq('id', memberId);
@@ -102,7 +102,7 @@ export function LeadAssignmentSelector({
         if (currentAssignee) {
           const prevMember = teamMembers.find(m => m.id === currentAssignee);
           if (prevMember && prevMember.current_lead_count > 0) {
-            await supabase
+            await api
               .from('team_members')
               .update({ current_lead_count: prevMember.current_lead_count - 1 })
               .eq('id', currentAssignee);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, forwardRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { RotateCcw, Clock, Settings, Play, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -42,7 +42,7 @@ export const RetryManager = forwardRef<HTMLDivElement, RetryManagerProps>(
 
     const fetchFailedLeads = useCallback(async () => {
       try {
-        let query = supabase
+        let query = api
           .from('leads')
           .select('id, name, email, mobile, batch_id, retry_count, api_response, created_at, university_id')
           .in('status', ['Fail', 'failed'])
@@ -85,17 +85,11 @@ export const RetryManager = forwardRef<HTMLDivElement, RetryManagerProps>(
       setRetrying(prev => new Set(prev).add(leadId));
       
       try {
-        const { error } = await supabase
-          .from('leads')
-          .update({ 
-            status: 'pending',
-            api_response: null,
-          })
-          .eq('id', leadId);
+        const { error } = await api.functions.invoke('retry-leads', { body: { lead_ids: [leadId] } });
 
         if (error) throw error;
         
-        toast({ title: 'Lead Queued', description: 'Lead has been queued for retry' });
+        toast({ title: 'Retry complete', description: 'The lead was sent again and archived' });
         fetchFailedLeads();
       } catch (error) {
         console.error('Error retrying lead:', error);
@@ -119,17 +113,11 @@ export const RetryManager = forwardRef<HTMLDivElement, RetryManagerProps>(
       
       try {
         const leadIds = failedLeads.map(l => l.id);
-        const { error } = await supabase
-          .from('leads')
-          .update({ 
-            status: 'pending',
-            api_response: null,
-          })
-          .in('id', leadIds);
+        const { error } = await api.functions.invoke('retry-leads', { body: { lead_ids: leadIds } });
 
         if (error) throw error;
         
-        toast({ title: 'Leads Queued', description: `${failedLeads.length} leads queued for retry` });
+        toast({ title: 'Retries complete', description: `${failedLeads.length} leads were sent again and archived` });
         fetchFailedLeads();
       } catch (error) {
         console.error('Error retrying leads:', error);
@@ -146,7 +134,7 @@ export const RetryManager = forwardRef<HTMLDivElement, RetryManagerProps>(
       }
 
       try {
-        const { error } = await supabase
+        const { error } = await api
           .from('universities')
           .update({
             auto_retry_enabled: retrySettings.enabled,

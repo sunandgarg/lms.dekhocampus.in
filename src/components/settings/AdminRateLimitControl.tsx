@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 interface RateLimitConfig {
@@ -31,8 +31,8 @@ function AdminRateLimitControlInner() {
     let cancelled = false;
     (async () => {
       const [rl, dl] = await Promise.all([
-        supabase.from('app_settings').select('value').eq('key', 'rate_limit_config').maybeSingle(),
-        supabase.from('app_settings').select('value').eq('key', 'dll_global_config').maybeSingle(),
+        api.from('app_settings').select('value').eq('key', 'rate_limit_config').maybeSingle(),
+        api.from('app_settings').select('value').eq('key', 'dll_global_config').maybeSingle(),
       ]);
       if (cancelled) return;
       if (rl.data?.value) { try { setConfig(JSON.parse(rl.data.value)); } catch {} }
@@ -45,7 +45,7 @@ function AdminRateLimitControlInner() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('app_settings')
         .upsert(
           { key: 'rate_limit_config', value: JSON.stringify(config), description: 'Admin rate limit control' },
@@ -63,7 +63,7 @@ function AdminRateLimitControlInner() {
   const handleSaveDll = async () => {
     setSavingDll(true);
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('app_settings')
         .upsert(
           { key: 'dll_global_config', value: JSON.stringify(dll), description: 'Global daily lead limit cap' },

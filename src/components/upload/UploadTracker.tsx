@@ -16,7 +16,7 @@ import {
   AlertTriangle,
   Download
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { generateSlug } from '@/lib/datastore/slug-utils';
 import { format } from 'date-fns';
@@ -96,7 +96,7 @@ export function UploadTracker({ universities, onViewBatch }: UploadTrackerProps)
   const fetchBatches = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('upload_batches')
         .select('id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, processed_count, status, is_paused, is_cancelled, created_at, completed_at, error_message')
         .order('created_at', { ascending: false })
@@ -142,7 +142,7 @@ export function UploadTracker({ universities, onViewBatch }: UploadTrackerProps)
     setLoadingLeads(prev => new Set(prev).add(batchId));
     
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('leads')
         .select('id, name, email, mobile, status, api_response, retry_count, processed_at')
         .eq('batch_id', batchId)
@@ -191,7 +191,7 @@ export function UploadTracker({ universities, onViewBatch }: UploadTrackerProps)
   const handlePauseResume = async (batch: UploadBatch) => {
     try {
       const newPausedState = !batch.isPaused;
-      const { error } = await supabase
+      const { error } = await api
         .from('upload_batches')
         .update({ 
           is_paused: newPausedState,
@@ -215,7 +215,7 @@ export function UploadTracker({ universities, onViewBatch }: UploadTrackerProps)
   // Retry failed leads
   const handleRetryFailed = async (batchId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('leads')
         .update({ status: 'pending', retry_count: 0 })
         .eq('batch_id', batchId)

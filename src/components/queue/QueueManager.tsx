@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Play, Pause, X, RefreshCw, Filter, List, Eye, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -37,7 +37,7 @@ export function QueueManager({ universities, onViewBatch }: QueueManagerProps) {
 
   const fetchBatches = useCallback(async () => {
     try {
-      let query = supabase
+      let query = api
         .from('upload_batches')
         .select('id, university_id, file_name, total_leads, success_count, fail_count, processed_count, status, is_paused, is_cancelled, created_at')
         .in('status', ['processing', 'pending', 'paused'])
@@ -72,7 +72,7 @@ export function QueueManager({ universities, onViewBatch }: QueueManagerProps) {
 
   // Real-time subscription
   useEffect(() => {
-    const channel = supabase
+    const channel = api
       .channel('queue-updates')
       .on(
         'postgres_changes',
@@ -88,14 +88,14 @@ export function QueueManager({ universities, onViewBatch }: QueueManagerProps) {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      api.removeChannel(channel);
     };
   }, [fetchBatches]);
 
   const handlePauseResume = async (batch: Batch) => {
     try {
       const newPausedState = !batch.is_paused;
-      const { error } = await supabase
+      const { error } = await api
         .from('upload_batches')
         .update({ 
           is_paused: newPausedState,
@@ -118,7 +118,7 @@ export function QueueManager({ universities, onViewBatch }: QueueManagerProps) {
     if (!window.confirm('Are you sure you want to cancel this batch? This cannot be undone.')) return;
     
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('upload_batches')
         .update({ 
           is_cancelled: true,

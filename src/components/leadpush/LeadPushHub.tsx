@@ -98,14 +98,14 @@ const LEAD_PUSH_MODULES = [
   },
   {
     id: "purge-cache",
-    name: "Purge Uni Cache",
-    description: "Clear cached lead push data (logs, leads, batches) for a chosen university or all.",
-    icon: Trash2,
+    name: "Lead Archive",
+    description: "Find retained batches and download private source and transaction ZIP reports.",
+    icon: History,
     color: "from-red-500 to-red-600",
     bgColor: "bg-red-500/10",
     textColor: "text-red-500",
     route: "/lead-push/purge-cache",
-    features: ["Per-University", "All Universities", "0/1/2/30 Days", "Instant"],
+    features: ["Private S3", "Batch ZIP", "Retained History"],
   },
 ];
 

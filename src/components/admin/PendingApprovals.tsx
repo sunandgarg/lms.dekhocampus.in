@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { Check, X, Loader2, UserCheck, Users, Clock, RefreshCw } from 'lucide-react';
@@ -25,7 +25,7 @@ export function PendingApprovals() {
   const fetchUsers = useCallback(async () => {
     try {
       setError(null);
-      const { data, error: fetchError } = await supabase
+      const { data, error: fetchError } = await api
         .from('profiles')
         .select('id, email, full_name, created_at, is_approved')
         .order('created_at', { ascending: false });
@@ -54,7 +54,7 @@ export function PendingApprovals() {
 
   // Set up realtime subscription for profile changes
   useEffect(() => {
-    const channel = supabase
+    const channel = api
       .channel('profiles-changes')
       .on(
         'postgres_changes',
@@ -70,7 +70,7 @@ export function PendingApprovals() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      api.removeChannel(channel);
     };
   }, [fetchUsers]);
 
@@ -79,14 +79,9 @@ export function PendingApprovals() {
     
     setProcessingId(userId);
     try {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({
-          is_approved: true,
-          approved_by: user.id,
-          approved_at: new Date().toISOString(),
-        })
-        .eq('id', userId);
+      const { error: updateError } = await api.functions.invoke('admin-user-management', {
+        body: { action: 'approve_user', user_id: userId },
+      });
 
       if (updateError) throw updateError;
 
@@ -116,10 +111,9 @@ export function PendingApprovals() {
   const handleReject = async (userId: string) => {
     setProcessingId(userId);
     try {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ is_approved: false })
-        .eq('id', userId);
+      const { error: updateError } = await api.functions.invoke('admin-user-management', {
+        body: { action: 'revoke_user', user_id: userId },
+      });
 
       if (updateError) throw updateError;
 

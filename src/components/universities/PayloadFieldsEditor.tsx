@@ -735,6 +735,9 @@ export function columnMappingToPayloadFields(mapping: Record<string, string>): P
         fields.push({
           id: key.replace("__field_", ""),
           ...config,
+          sourceType: config.sourceType || 'lead_data',
+          isRequired: Boolean(config.isRequired),
+          sortOrder: Number(config.sortOrder) || 0,
           fieldName,
           displayName: stringifyPayloadFieldValue(config.displayName) || fieldName,
           sourceKey: stringifyPayloadFieldValue(config.sourceKey) || undefined,

@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   X, 
@@ -100,7 +100,7 @@ export function LeadDetailPanel({
 
   const fetchContact = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('crm_contacts')
         .select('*')
         .eq('id', contactId)
@@ -126,7 +126,7 @@ export function LeadDetailPanel({
     setIsSaving(true);
 
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('crm_contacts')
         .update({
           ...editData,
@@ -155,7 +155,7 @@ export function LeadDetailPanel({
       const previousStage = stages.find(s => s.id === contact.stage_id);
       const newStage = stages.find(s => s.id === stageId);
 
-      const { error } = await supabase
+      const { error } = await api
         .from('crm_contacts')
         .update({ 
           stage_id: stageId, 
@@ -166,7 +166,7 @@ export function LeadDetailPanel({
       if (error) throw error;
 
       // Log activity
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: contact.id,
         type: 'stage_change',
         title: 'Stage Changed',
@@ -191,7 +191,7 @@ export function LeadDetailPanel({
     });
 
     // Log the push activity
-    await supabase.from('crm_activities').insert({
+    await api.from('crm_activities').insert({
       contact_id: contact.id,
       type: 'data_push',
       title: 'Pushed to University',

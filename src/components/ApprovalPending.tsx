@@ -1,5 +1,5 @@
 import { Clock, Mail, LogOut } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useNavigate } from 'react-router-dom';
 
 interface ApprovalPendingProps {
@@ -10,7 +10,7 @@ export function ApprovalPending({ email }: ApprovalPendingProps) {
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    await api.auth.signOut();
     navigate('/auth', { replace: true });
   };
 

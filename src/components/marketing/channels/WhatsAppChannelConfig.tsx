@@ -28,7 +28,7 @@ import {
   Shield,
   Star
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { WHATSAPP_PROVIDERS, MarketingIntegration } from '@/types/marketing';
 
@@ -47,7 +47,7 @@ export function WhatsAppChannelConfig() {
 
   const fetchIntegrations = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_integrations')
         .select('*')
         .eq('type', 'whatsapp')
@@ -81,7 +81,7 @@ export function WhatsAppChannelConfig() {
         is_primary: integrations.length === 0,
       };
 
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_integrations')
         .insert(integration);
 
@@ -98,7 +98,7 @@ export function WhatsAppChannelConfig() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_integrations')
         .delete()
         .eq('id', id);

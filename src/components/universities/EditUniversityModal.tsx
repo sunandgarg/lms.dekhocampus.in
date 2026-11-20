@@ -14,7 +14,7 @@ import {
   columnMappingToPayloadFields,
   downloadSampleCSV,
 } from "./PayloadFieldsEditor";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/integrations/api/client";
 import { UniversityImportExport } from "./UniversityImportExport";
 import { MultiPushDefaultsEditor } from "./MultiPushDefaultsEditor";
 import { CustomHeadersEditor } from "./CustomHeadersEditor";
@@ -248,7 +248,7 @@ export function EditUniversityModal({ isOpen, university, onClose, onSave }: Edi
 
     try {
       const columnMapping = payloadFieldsToColumnMapping(payloadFields);
-      const { data, error } = await supabase.functions.invoke("test-api", {
+      const { data, error } = await api.functions.invoke("test-api", {
         body: {
           apiUrl: formData.apiUrl,
           secretKey: formData.secretKey,

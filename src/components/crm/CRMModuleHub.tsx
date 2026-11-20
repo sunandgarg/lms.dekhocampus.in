@@ -1,6 +1,6 @@
 import { useState, memo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { 
   Users, 
   Megaphone, 
@@ -245,10 +245,10 @@ const QuickStats = memo(() => {
       try {
         const today = new Date().toISOString().split('T')[0];
         const [contacts, tasks, stages, activities] = await Promise.all([
-          supabase.from('crm_contacts').select('id', { count: 'exact', head: true }),
-          supabase.from('crm_tasks').select('id', { count: 'exact', head: true }).neq('status', 'completed'),
-          supabase.from('pipeline_stages').select('id', { count: 'exact', head: true }),
-          supabase.from('crm_activities').select('id', { count: 'exact', head: true }).gte('created_at', today),
+          api.from('crm_contacts').select('id', { count: 'exact', head: true }),
+          api.from('crm_tasks').select('id', { count: 'exact', head: true }).neq('status', 'completed'),
+          api.from('pipeline_stages').select('id', { count: 'exact', head: true }),
+          api.from('crm_activities').select('id', { count: 'exact', head: true }).gte('created_at', today),
         ]);
         setStats([
           { label: 'Total Contacts', value: String(contacts.count || 0), change: 'all time', positive: true },

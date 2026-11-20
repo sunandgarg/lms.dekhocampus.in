@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useAuth } from './useAuth';
 import { useAdminAuth } from './useAdminAuth';
 
@@ -69,7 +69,7 @@ export function usePermissions() {
     }
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('user_permissions')
         .select('permission')
         .eq('user_id', user.id);

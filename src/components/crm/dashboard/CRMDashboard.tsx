@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { 
   Users, 
   UserCheck, 
@@ -52,10 +52,10 @@ export function CRMDashboard({ universities: _universities }: CRMDashboardProps)
   const fetchDashboardData = async () => {
     try {
       const [contactsRes, stagesRes, activitiesRes, tasksRes] = await Promise.all([
-        supabase.from('crm_contacts').select('id, created_at, stage_id', { count: 'exact' }).limit(1000),
-        supabase.from('pipeline_stages').select('*').order('sort_order'),
-        supabase.from('crm_activities').select('*').order('created_at', { ascending: false }).limit(10),
-        supabase.from('crm_tasks').select('id, status, due_date'),
+        api.from('crm_contacts').select('id, created_at, stage_id', { count: 'exact' }).limit(1000),
+        api.from('pipeline_stages').select('*').order('sort_order'),
+        api.from('crm_activities').select('*').order('created_at', { ascending: false }).limit(10),
+        api.from('crm_tasks').select('id, status, due_date'),
       ]);
 
       const contacts = contactsRes.data || [];

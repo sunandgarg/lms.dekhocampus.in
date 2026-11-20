@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { ALL_PERMISSIONS } from '@/hooks/usePermissions';
@@ -50,8 +50,8 @@ export function UserManagement() {
   const { user } = useAuth();
 
   const callAdmin = useCallback(async (action: string, params: Record<string, any> = {}) => {
-    await supabase.auth.getSession();
-    const res = await supabase.functions.invoke('admin-user-management', {
+    await api.auth.getSession();
+    const res = await api.functions.invoke('admin-user-management', {
       body: { action, ...params },
     });
     if (res.error) {
@@ -412,7 +412,7 @@ export function UserManagement() {
             </div>
             <div>
               <label className="text-sm font-medium text-foreground">Password *</label>
-              <Input value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min 6 characters" type="password" />
+              <Input value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min 12 characters" type="password" />
             </div>
             <div>
               <label className="text-sm font-medium text-foreground">Role</label>
@@ -449,7 +449,7 @@ export function UserManagement() {
           </DialogHeader>
           <div className="py-4">
             <label className="text-sm font-medium text-foreground">New Password</label>
-            <Input value={changePassword} onChange={e => setChangePassword(e.target.value)} placeholder="Min 6 characters" type="password" />
+            <Input value={changePassword} onChange={e => setChangePassword(e.target.value)} placeholder="Min 12 characters" type="password" />
           </div>
           <DialogFooter>
             <button onClick={() => setShowPasswordModal(false)} className="px-4 py-2 border border-border rounded-lg text-sm">Cancel</button>

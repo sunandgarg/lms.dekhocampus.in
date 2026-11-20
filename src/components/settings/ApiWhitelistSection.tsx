@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 const PROBE_COUNT = 20;
@@ -55,7 +55,7 @@ export function ApiWhitelistSection() {
       await Promise.all(
         Array.from({ length: PROBE_COUNT }).map(async () => {
           try {
-            const { data } = await supabase.functions.invoke('server-ip');
+            const { data } = await api.functions.invoke('server-ip');
             if (data?.ip) found.add(data.ip);
           } catch (e) {
             console.warn('probe failed', e);

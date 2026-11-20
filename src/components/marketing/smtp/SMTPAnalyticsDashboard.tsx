@@ -13,7 +13,7 @@ import {
   RefreshCw, Send, CheckCircle, Eye, MousePointer, XCircle, AlertTriangle,
   TrendingUp, TrendingDown, Globe, Users, PieChart as PieChartIcon
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, BarChart, Bar, Legend
@@ -85,27 +85,27 @@ export function SMTPAnalyticsDashboard() {
       const daysAgo = timeRange === '24h' ? 1 : timeRange === '7d' ? 7 : 30;
       const startDate = subDays(new Date(), daysAgo).toISOString();
 
-      const { data: emailLogs, error: logsError } = await supabase
+      const { data: emailLogs, error: logsError } = await api
         .from('smtp_email_logs')
         .select('*')
         .gte('created_at', startDate);
 
       if (logsError) throw logsError;
 
-      const { data: trackingEvents, error: eventsError } = await supabase
+      const { data: trackingEvents, error: eventsError } = await api
         .from('smtp_tracking_events')
         .select('*')
         .gte('created_at', startDate);
 
       if (eventsError) throw eventsError;
 
-      const { data: campaigns, error: campaignsError } = await supabase
+      const { data: campaigns, error: campaignsError } = await api
         .from('smtp_campaigns')
         .select('id, name');
 
       if (campaignsError) throw campaignsError;
 
-      const { data: domains, error: domainsError } = await supabase
+      const { data: domains, error: domainsError } = await api
         .from('smtp_domains')
         .select('id, domain, reputation_score');
 

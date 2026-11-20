@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +17,7 @@ export function FunnelCampaignModule() {
   const { data: campaigns = [], isLoading } = useQuery({
     queryKey: ['funnel-campaigns'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('funnel_campaigns')
         .select('*')
         .order('created_at', { ascending: false });

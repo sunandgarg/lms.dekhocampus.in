@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Upload,
@@ -168,14 +168,14 @@ export function BulkLeadImport({ universities, stages, onImportComplete }: BulkL
       }));
 
       try {
-        const { error, data } = await supabase.from('crm_contacts').insert(rows).select('id');
+        const { error, data } = await api.from('crm_contacts').insert(rows).select('id');
         if (error) throw error;
         success += data?.length || rows.length;
       } catch (error) {
         // Fallback: insert one-by-one for this batch to save what we can
         for (const row of rows) {
           try {
-            const { error: singleErr } = await supabase.from('crm_contacts').insert(row);
+            const { error: singleErr } = await api.from('crm_contacts').insert(row);
             if (singleErr) throw singleErr;
             success++;
           } catch {

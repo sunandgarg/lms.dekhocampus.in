@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
-import { Search, Calendar, FileText, CheckCircle2, XCircle, Clock, RefreshCw, Filter, Building2, ChevronDown, ChevronUp, BarChart3 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { Search, Calendar, FileText, CheckCircle2, XCircle, Clock, RefreshCw, Filter, Building2, ChevronDown, ChevronUp, BarChart3, Download } from "lucide-react";
+import { api } from "@/integrations/api/client";
 import { format } from "date-fns";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 
@@ -63,7 +63,7 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
       }
       setLoading(true);
       try {
-        let query = supabase
+        let query = api
           .from("upload_batches")
           .select("id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, created_at, completed_at")
           .order("created_at", { ascending: false });
@@ -305,10 +305,15 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
                       <td className="px-4 py-3 text-center font-mono text-destructive">{batch.fail_count}</td>
                       <td className="px-4 py-3 text-center">{getStatusBadge(batch)}</td>
                       <td className="px-4 py-3 text-center">
-                        <button onClick={() => fetchBatchReport(batch.id)} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                          <BarChart3 className="h-3.5 w-3.5" />
-                          {expandedBatch === batch.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                        </button>
+                        <div className="inline-flex items-center gap-3">
+                          <button onClick={() => fetchBatchReport(batch.id)} title="View summary" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                            <BarChart3 className="h-3.5 w-3.5" />
+                            {expandedBatch === batch.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          </button>
+                          <a href={`/api/batches/${batch.id}/archive.zip`} title="Download source and transaction ZIP" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                            <Download className="h-3.5 w-3.5" /> ZIP
+                          </a>
+                        </div>
                       </td>
                     </tr>
                     {expandedBatch === batch.id && (

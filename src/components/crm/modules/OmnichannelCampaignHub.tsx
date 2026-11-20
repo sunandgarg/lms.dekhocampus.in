@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -48,7 +48,7 @@ export function OmnichannelCampaignHub() {
   const { data: campaigns = [], isLoading } = useQuery({
     queryKey: ['omni-campaigns'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_campaigns')
         .select('*')
         .order('created_at', { ascending: false })
@@ -62,7 +62,7 @@ export function OmnichannelCampaignHub() {
   const { data: segments = [] } = useQuery({
     queryKey: ['omni-segments'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('lead_segments')
         .select('id, name, lead_count')
         .eq('is_active', true);
@@ -75,7 +75,7 @@ export function OmnichannelCampaignHub() {
   const { data: totalContacts = 0 } = useQuery({
     queryKey: ['omni-contact-count'],
     queryFn: async () => {
-      const { count, error } = await supabase
+      const { count, error } = await api
         .from('crm_contacts')
         .select('id', { count: 'exact', head: true });
       if (error) throw error;
@@ -87,7 +87,7 @@ export function OmnichannelCampaignHub() {
   const saveCampaign = useMutation({
     mutationFn: async (status: string) => {
       if (!campaignName.trim()) throw new Error('Campaign name required');
-      const { error } = await supabase.from('marketing_campaigns').insert({
+      const { error } = await api.from('marketing_campaigns').insert({
         name: campaignName,
         channels: [activeChannel],
         status,

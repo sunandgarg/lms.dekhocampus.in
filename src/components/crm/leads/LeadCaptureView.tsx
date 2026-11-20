@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Plus, 
@@ -100,7 +100,7 @@ export function LeadCaptureView({ universities }: LeadCaptureViewProps) {
 
   const fetchForms = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('lead_capture_forms')
         .select('*')
         .order('created_at', { ascending: false });
@@ -148,7 +148,7 @@ export function LeadCaptureView({ universities }: LeadCaptureViewProps) {
     }
 
     try {
-      const { error } = await supabase.from('lead_capture_forms').insert([{
+      const { error } = await api.from('lead_capture_forms').insert([{
         name: newForm.name,
         description: newForm.description || null,
         university_id: newForm.university_id || null,
@@ -179,7 +179,7 @@ export function LeadCaptureView({ universities }: LeadCaptureViewProps) {
 
   const toggleFormActive = async (formId: string, isActive: boolean) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('lead_capture_forms')
         .update({ is_active: isActive })
         .eq('id', formId);
@@ -193,7 +193,7 @@ export function LeadCaptureView({ universities }: LeadCaptureViewProps) {
 
   const deleteForm = async (formId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('lead_capture_forms')
         .delete()
         .eq('id', formId);

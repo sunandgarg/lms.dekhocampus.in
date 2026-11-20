@@ -12,7 +12,7 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { PresetManager } from './PresetManager';
 import { MultiPushReport } from './MultiPushReport';
 
@@ -99,8 +99,8 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
   useEffect(() => {
     (async () => {
       const [presetRes, uniRes] = await Promise.all([
-        supabase.from('multi_push_presets').select('*').order('is_default', { ascending: false }),
-        supabase.from('universities').select('id, default_values'),
+        api.from('multi_push_presets').select('*').order('is_default', { ascending: false }),
+        api.from('universities').select('id, default_values'),
       ]);
       setPresets(presetRes.data || []);
       const map: Record<string, Record<string, string>> = {};
@@ -177,11 +177,11 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
     const startedAt = performance.now();
 
     // 1. Create one batch per university - in parallel (was sequential).
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await api.auth.getUser();
     const batchByUni: Record<string, string> = {};
     const batchInserts = await Promise.all(
       selectedUniversities.map((uni) =>
-        supabase
+        api
           .from('upload_batches')
           .insert({
             file_name: `MultiPush: ${fileName}`,
@@ -299,7 +299,7 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
         if (idx >= tasks.length) return;
         const task = tasks[idx];
         try {
-          const { data, error } = await supabase.functions.invoke('process-lead', {
+          const { data, error } = await api.functions.invoke('process-lead', {
             body: { tasks: [task.payload], concurrency: 1 },
           });
           if (error) throw error;
@@ -344,7 +344,7 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
     // 3. Mark batches complete - in parallel.
     await Promise.all(
       Object.values(batchByUni).map((bid) =>
-        supabase.from('upload_batches').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', bid),
+        api.from('upload_batches').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', bid),
       ),
     );
 
@@ -479,7 +479,7 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
             selectedIds={selectedUniIds}
             onApply={applyPreset}
             onChange={async () => {
-              const { data } = await supabase
+              const { data } = await api
                 .from('multi_push_presets')
                 .select('*')
                 .order('is_default', { ascending: false });

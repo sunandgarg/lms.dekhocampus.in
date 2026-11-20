@@ -1,7 +1,7 @@
 // Background Processor - Handles processing even when tab is hidden
 
 import type { UploadEntity, UploadLeadEntity, BackgroundTask } from './types';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 
 type ProcessorCallback = (event: ProcessorEvent) => void;
 
@@ -113,7 +113,7 @@ class BackgroundProcessor {
           if (sig === 'pause') { controlState = 'pause'; return; }
           const task = this.activeTasks.get(upload.slug);
           if (!task || task.status !== 'running') { controlState = 'pause'; return; }
-          const { data } = await supabase
+          const { data } = await api
             .from('upload_batches')
             .select('is_paused, is_cancelled')
             .eq('id', upload.id)
@@ -147,7 +147,7 @@ class BackgroundProcessor {
       const snapshot = completedCount;
       lastFlushed = snapshot;
       try {
-        await supabase
+        await api
           .from('upload_batches')
           .update({ current_lead_index: snapshot, processed_count: snapshot })
           .eq('id', upload.id);
@@ -179,7 +179,7 @@ class BackgroundProcessor {
 
         // Fire lead-row update + counter RPC in parallel; don't serialize.
         await Promise.all([
-          supabase
+          api
             .from('leads')
             .update({
               status: result.success ? 'success' : 'failed',
@@ -187,7 +187,7 @@ class BackgroundProcessor {
               processed_at: new Date().toISOString(),
             })
             .eq('id', lead.id),
-          supabase.rpc(
+          api.rpc(
             result.success ? 'increment_batch_success' : 'increment_batch_fail',
             { batch_uuid: upload.id },
           ),
@@ -256,7 +256,7 @@ class BackgroundProcessor {
     _signal?: AbortSignal,
   ): Promise<{ success: boolean; response: string }> {
     try {
-      const { data, error } = await supabase.functions.invoke('process-lead', {
+      const { data, error } = await api.functions.invoke('process-lead', {
         body: {
           leadId: lead.id,
           universityId: upload.universityId,
@@ -349,7 +349,7 @@ class BackgroundProcessor {
       task.progress = 100;
     }
 
-    await supabase
+    await api
       .from('upload_batches')
       .update({
         status: 'completed',

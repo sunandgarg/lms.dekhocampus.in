@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { supabase, supabaseProjectUrl } from '@/integrations/supabase/client';
+import { api, apiBaseUrl } from '@/integrations/api/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Phone, 
@@ -28,8 +28,7 @@ import {
 } from 'lucide-react';
 import React from 'react';
 
-// Get the Supabase project URL for webhooks
-const SUPABASE_URL = supabaseProjectUrl;
+const API_BASE_URL = apiBaseUrl;
 
 // Integration categories based on Meritto/Automateazy
 const INTEGRATION_CATEGORIES = {
@@ -41,7 +40,7 @@ const INTEGRATION_CATEGORIES = {
         id: 'facebook-lead', 
         name: 'Facebook Lead Ads', 
         description: 'Capture leads from Facebook/Meta Lead Forms',
-        webhook: `${SUPABASE_URL}/functions/v1/meta-ads-webhook`,
+        webhook: `${API_BASE_URL}/api/webhooks/meta-ads-webhook`,
         fields: ['page_id', 'form_id', 'access_token'],
         instructions: [
           '1. Go to Meta Business Suite → All Tools → Leads Center',
@@ -54,7 +53,7 @@ const INTEGRATION_CATEGORIES = {
         id: 'google-lead', 
         name: 'Google Lead Ads', 
         description: 'Webhook for Google Lead Form Extensions',
-        webhook: `${SUPABASE_URL}/functions/v1/google-ads-webhook`,
+        webhook: `${API_BASE_URL}/api/webhooks/google-ads-webhook`,
         fields: ['customer_id', 'campaign_id'],
         instructions: [
           '1. In Google Ads, go to Tools → Linked accounts',
@@ -159,7 +158,7 @@ export function IntegrationsSettings() {
   const { data: savedIntegrations = [] } = useQuery({
     queryKey: ['marketing-integrations'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_integrations')
         .select('*')
         .order('created_at', { ascending: false });
@@ -181,7 +180,7 @@ export function IntegrationsSettings() {
     }) => {
       if (data.id) {
         // Update existing
-        const { error } = await supabase
+        const { error } = await api
           .from('marketing_integrations')
           .update({
             configuration: data.configuration,
@@ -193,7 +192,7 @@ export function IntegrationsSettings() {
         if (error) throw error;
       } else {
         // Create new
-        const { error } = await supabase
+        const { error } = await api
           .from('marketing_integrations')
           .insert([{
             name: data.name,
@@ -227,7 +226,7 @@ export function IntegrationsSettings() {
   // Delete integration mutation
   const deleteIntegration = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_integrations')
         .delete()
         .eq('id', id);

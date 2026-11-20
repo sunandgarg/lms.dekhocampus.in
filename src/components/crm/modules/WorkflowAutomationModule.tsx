@@ -1,7 +1,7 @@
 import { memo, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import ReactFlow, {
   addEdge, useNodesState, useEdgesState, Controls, Background, MiniMap,
@@ -112,7 +112,7 @@ export function WorkflowAutomationModule() {
   const { data: workflows = [], isLoading } = useQuery({
     queryKey: ['marketing-workflows'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_workflows')
         .select('*')
         .order('created_at', { ascending: false });
@@ -133,10 +133,10 @@ export function WorkflowAutomationModule() {
         edges: edges as any,
       };
       if (selectedWorkflow?.id) {
-        const { error } = await supabase.from('marketing_workflows').update(payload).eq('id', selectedWorkflow.id);
+        const { error } = await api.from('marketing_workflows').update(payload).eq('id', selectedWorkflow.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('marketing_workflows').insert(payload);
+        const { error } = await api.from('marketing_workflows').insert(payload);
         if (error) throw error;
       }
     },
@@ -150,7 +150,7 @@ export function WorkflowAutomationModule() {
   // Delete workflow
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('marketing_workflows').delete().eq('id', id);
+      const { error } = await api.from('marketing_workflows').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {

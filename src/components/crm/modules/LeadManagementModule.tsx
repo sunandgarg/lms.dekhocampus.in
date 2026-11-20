@@ -1,7 +1,7 @@
 import { memo, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -65,7 +65,7 @@ export function LeadManagementModule({ universities }: LeadManagementModuleProps
   const { data: stages = [] } = useQuery({
     queryKey: ['pipeline-stages-lead-mgmt'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('pipeline_stages').select('*').order('sort_order');
+      const { data, error } = await api.from('pipeline_stages').select('*').order('sort_order');
       if (error) throw error;
       return data;
     },
@@ -78,7 +78,7 @@ export function LeadManagementModule({ universities }: LeadManagementModuleProps
   const { data: contacts = [], isLoading } = useQuery({
     queryKey: ['crm-leads-management'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('crm_contacts')
         .select('*, pipeline_stages(name)')
         .order('created_at', { ascending: false })
@@ -125,7 +125,7 @@ export function LeadManagementModule({ universities }: LeadManagementModuleProps
     mutationFn: async () => {
       if (!newLead.name.trim() || !newLead.mobile.trim()) throw new Error('Name and mobile required');
       const defaultStage = stages.find(s => s.name === 'Inquiry') || stages[0];
-      const { error } = await supabase.from('crm_contacts').insert({
+      const { error } = await api.from('crm_contacts').insert({
         name: newLead.name,
         mobile: newLead.mobile,
         email: newLead.email || null,
@@ -149,7 +149,7 @@ export function LeadManagementModule({ universities }: LeadManagementModuleProps
   const handleKanbanDrop = useCallback(async (leadId: string, newStageName: string) => {
     const stage = stages.find(s => s.name === newStageName);
     if (!stage) return;
-    const { error } = await supabase.from('crm_contacts').update({ stage_id: stage.id }).eq('id', leadId);
+    const { error } = await api.from('crm_contacts').update({ stage_id: stage.id }).eq('id', leadId);
     if (!error) queryClient.invalidateQueries({ queryKey: ['crm-leads-management'] });
     setDraggedLead(null);
   }, [stages, queryClient]);

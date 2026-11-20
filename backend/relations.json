@@ -1,0 +1,493 @@
+{
+  "ab_test_results": [
+    {
+      "column": "campaign_id",
+      "table": "marketing_campaigns",
+      "referencedColumn": "id"
+    }
+  ],
+  "api_logs": [
+    {
+      "column": "batch_id",
+      "table": "upload_batches",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "lead_id",
+      "table": "leads",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "automation_logs": [
+    {
+      "column": "rule_id",
+      "table": "automation_rules",
+      "referencedColumn": "id"
+    }
+  ],
+  "campaign_kpis": [
+    {
+      "column": "campaign_id",
+      "table": "marketing_campaigns",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "vendor_id",
+      "table": "marketing_integrations",
+      "referencedColumn": "id"
+    }
+  ],
+  "campaign_recipients": [
+    {
+      "column": "campaign_id",
+      "table": "marketing_campaigns",
+      "referencedColumn": "id"
+    }
+  ],
+  "communication_logs": [
+    {
+      "column": "automation_id",
+      "table": "marketing_workflows",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "list_id",
+      "table": "marketing_lists",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "segment_id",
+      "table": "lead_segments",
+      "referencedColumn": "id"
+    }
+  ],
+  "course_specializations": [
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "crm_activities": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    }
+  ],
+  "crm_contacts": [
+    {
+      "column": "lead_id",
+      "table": "leads",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "stage_id",
+      "table": "pipeline_stages",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "crm_tasks": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    }
+  ],
+  "custom_column_values": [
+    {
+      "column": "column_id",
+      "table": "custom_columns",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "parent_column_id",
+      "table": "custom_columns",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "parent_value_id",
+      "table": "custom_column_values",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "custom_columns": [
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "email_campaigns": [
+    {
+      "column": "template_id",
+      "table": "email_templates",
+      "referencedColumn": "id"
+    }
+  ],
+  "email_events": [
+    {
+      "column": "campaign_id",
+      "table": "email_campaigns",
+      "referencedColumn": "id"
+    }
+  ],
+  "email_logs": [
+    {
+      "column": "smtp_config_id",
+      "table": "smtp_config",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "template_id",
+      "table": "email_templates",
+      "referencedColumn": "id"
+    }
+  ],
+  "email_recipients": [
+    {
+      "column": "campaign_id",
+      "table": "email_campaigns",
+      "referencedColumn": "id"
+    }
+  ],
+  "form_submissions": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "form_id",
+      "table": "lead_capture_forms",
+      "referencedColumn": "id"
+    }
+  ],
+  "funnel_campaign_contacts": [
+    {
+      "column": "campaign_id",
+      "table": "funnel_campaigns",
+      "referencedColumn": "id"
+    }
+  ],
+  "funnel_campaigns": [
+    {
+      "column": "email_template_id",
+      "table": "smtp_templates",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "landing_pages": [
+    {
+      "column": "preset_id",
+      "table": "multi_push_presets",
+      "referencedColumn": "id"
+    }
+  ],
+  "lead_assignment_history": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "rule_id",
+      "table": "lead_assignment_rules",
+      "referencedColumn": "id"
+    }
+  ],
+  "lead_capture_forms": [
+    {
+      "column": "auto_assign_rule_id",
+      "table": "lead_assignment_rules",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "default_stage_id",
+      "table": "pipeline_stages",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "lead_events": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    }
+  ],
+  "lead_preferences": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    }
+  ],
+  "lead_score_history": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "rule_id",
+      "table": "lead_scoring_rules",
+      "referencedColumn": "id"
+    }
+  ],
+  "lead_segment_members": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "segment_id",
+      "table": "lead_segments",
+      "referencedColumn": "id"
+    }
+  ],
+  "leads": [
+    {
+      "column": "batch_id",
+      "table": "upload_batches",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "marketing_campaigns": [
+    {
+      "column": "integration_id",
+      "table": "marketing_integrations",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "template_id",
+      "table": "marketing_templates",
+      "referencedColumn": "id"
+    }
+  ],
+  "marketing_integrations": [
+    {
+      "column": "fallback_integration_id",
+      "table": "marketing_integrations",
+      "referencedColumn": "id"
+    }
+  ],
+  "marketing_leads": [
+    {
+      "column": "campaign_id",
+      "table": "marketing_campaigns",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "pushed_to_university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "marketing_list_contacts": [
+    {
+      "column": "list_id",
+      "table": "marketing_lists",
+      "referencedColumn": "id"
+    }
+  ],
+  "marketing_lists": [
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "marketing_sequence_steps": [
+    {
+      "column": "sequence_id",
+      "table": "marketing_sequences",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "template_id",
+      "table": "marketing_templates",
+      "referencedColumn": "id"
+    }
+  ],
+  "programs": [
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "sequence_enrollments": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "current_step_id",
+      "table": "marketing_sequence_steps",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "sequence_id",
+      "table": "marketing_sequences",
+      "referencedColumn": "id"
+    }
+  ],
+  "sequence_step_executions": [
+    {
+      "column": "enrollment_id",
+      "table": "sequence_enrollments",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "step_id",
+      "table": "marketing_sequence_steps",
+      "referencedColumn": "id"
+    }
+  ],
+  "smtp_campaigns": [
+    {
+      "column": "from_domain_id",
+      "table": "smtp_domains",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "list_id",
+      "table": "marketing_lists",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "segment_id",
+      "table": "lead_segments",
+      "referencedColumn": "id"
+    }
+  ],
+  "smtp_email_logs": [
+    {
+      "column": "campaign_id",
+      "table": "smtp_campaigns",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "domain_id",
+      "table": "smtp_domains",
+      "referencedColumn": "id"
+    }
+  ],
+  "smtp_link_clicks": [
+    {
+      "column": "email_log_id",
+      "table": "smtp_email_logs",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "link_id",
+      "table": "smtp_links",
+      "referencedColumn": "id"
+    }
+  ],
+  "smtp_links": [
+    {
+      "column": "campaign_id",
+      "table": "smtp_campaigns",
+      "referencedColumn": "id"
+    }
+  ],
+  "smtp_suppression_list": [
+    {
+      "column": "source_campaign_id",
+      "table": "smtp_campaigns",
+      "referencedColumn": "id"
+    }
+  ],
+  "smtp_tracking_events": [
+    {
+      "column": "email_log_id",
+      "table": "smtp_email_logs",
+      "referencedColumn": "id"
+    }
+  ],
+  "state_cities": [
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "template_versions": [
+    {
+      "column": "template_id",
+      "table": "marketing_templates",
+      "referencedColumn": "id"
+    }
+  ],
+  "university_api_keys": [
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "upload_batches": [
+    {
+      "column": "university_id",
+      "table": "universities",
+      "referencedColumn": "id"
+    }
+  ],
+  "url_clicks": [
+    {
+      "column": "url_id",
+      "table": "url_mappings",
+      "referencedColumn": "id"
+    }
+  ],
+  "workflow_executions": [
+    {
+      "column": "contact_id",
+      "table": "crm_contacts",
+      "referencedColumn": "id"
+    },
+    {
+      "column": "workflow_id",
+      "table": "marketing_workflows",
+      "referencedColumn": "id"
+    }
+  ]
+}

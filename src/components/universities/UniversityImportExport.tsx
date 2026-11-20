@@ -3,7 +3,7 @@ import { Download, Upload, FileJson } from 'lucide-react';
 import { PayloadField, columnMappingToPayloadFields } from './PayloadFieldsEditor';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 
 interface StateCity {
   state: string;
@@ -100,13 +100,13 @@ export async function fetchCompleteUniversitiesForExport(
 
   const [universitiesRes, programsRes, stateCitiesRes, coursesRes, columnsRes, apiKeysRes, defaultsRes] =
     await Promise.all([
-      supabase.from('universities').select('*').in('id', ids),
-      supabase.from('programs').select('*').in('university_id', ids),
-      supabase.from('state_cities').select('*').in('university_id', ids),
-      supabase.from('course_specializations').select('*').in('university_id', ids),
-      supabase.from('custom_columns').select('*').in('university_id', ids).order('sort_order'),
-      supabase.from('university_api_keys').select('*').in('university_id', ids),
-      supabase.from('multi_push_university_defaults').select('*').in('university_id', ids),
+      api.from('universities').select('*').in('id', ids),
+      api.from('programs').select('*').in('university_id', ids),
+      api.from('state_cities').select('*').in('university_id', ids),
+      api.from('course_specializations').select('*').in('university_id', ids),
+      api.from('custom_columns').select('*').in('university_id', ids).order('sort_order'),
+      api.from('university_api_keys').select('*').in('university_id', ids),
+      api.from('multi_push_university_defaults').select('*').in('university_id', ids),
     ]);
 
   throwQueryError('university configuration', universitiesRes.error);
@@ -119,13 +119,13 @@ export async function fetchCompleteUniversitiesForExport(
 
   const columnIds = (columnsRes.data || []).map((column) => column.id);
   const valuesRes = columnIds.length > 0
-    ? await supabase.from('custom_column_values').select('*').in('column_id', columnIds)
+    ? await api.from('custom_column_values').select('*').in('column_id', columnIds)
     : { data: [], error: null };
   throwQueryError('custom column values', valuesRes.error);
 
-  const rowById = new Map((universitiesRes.data || []).map((row) => [row.id, row]));
+  const rowById = new Map<string, Record<string, any>>((universitiesRes.data || []).map((row) => [row.id, row]));
   const valueById = new Map((valuesRes.data || []).map((value) => [value.id, value.value]));
-  const forUniversity = <T extends { university_id: string }>(rows: T[] | null, id: string) =>
+  const forUniversity = (rows: Array<Record<string, any>> | null, id: string): Array<Record<string, any>> =>
     (rows || []).filter((row) => row.university_id === id);
 
   return requested.map((provided) => {

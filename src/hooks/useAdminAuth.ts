@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useAuth } from './useAuth';
 
 interface AdminAuthState {
@@ -12,7 +12,7 @@ interface AdminAuthState {
 
 const ADMIN_AUTH_TIMEOUT_MS = 8000;
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
     promise.then(
@@ -68,10 +68,7 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
   // Track which user ID we've already checked to avoid redundant checks
   const checkedUserIdRef = useRef<string | null>(null);
   const isInitialCheckDoneRef = useRef(false);
-  // useAdminAuth is mounted by several components at the same time. Supabase
-  // reuses channels by topic, so a shared topic lets one hook subscribe before
-  // another hook adds its postgres_changes callback, which throws and crashes
-  // the React tree. Give every hook instance its own channel topic.
+  // Keep a separate refresh channel for each mounted hook instance.
   const channelInstanceIdRef = useRef(Math.random().toString(36).slice(2));
 
   const checkAdminStatus = useCallback(async (isInitial: boolean = false) => {
@@ -114,7 +111,7 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
     try {
       // Ensure a profile exists for this user
       const { data: existingProfile, error: profileReadError } = await withTimeout(
-        supabase
+        api
         .from('profiles')
         .select('id')
         .eq('id', user.id)
@@ -128,12 +125,14 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
       }
 
       if (!existingProfile) {
-        supabase
+        api
           .from('profiles')
           .insert({
             id: user.id,
             email: user.email ?? '',
             full_name: (user.user_metadata as any)?.full_name ?? user.email ?? null,
+            role: user.role,
+            is_approved: user.is_approved,
           })
           .then(({ error: profileInsertError }) => {
             if (profileInsertError) {
@@ -145,8 +144,8 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
       // Check if user has admin role
       const [{ data: hasAdminRole, error: roleError }, { data: approvedData, error: approvedError }] = await withTimeout(
         Promise.all([
-          supabase.rpc('has_role', { _user_id: user.id, _role: 'admin' }),
-          supabase.rpc('is_user_approved', { _user_id: user.id }),
+          api.rpc('has_role', { _user_id: user.id, _role: 'admin' }),
+          api.rpc('is_user_approved', { _user_id: user.id }),
         ]),
         ADMIN_AUTH_TIMEOUT_MS,
         'Admin permission lookup timed out.',
@@ -205,7 +204,7 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
   useEffect(() => {
     if (!user) return;
 
-    const channel = supabase
+    const channel = api
       .channel(`profile-changes:${user.id}:${channelInstanceIdRef.current}`)
       .on(
         'postgres_changes',
@@ -222,7 +221,7 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      api.removeChannel(channel);
     };
   }, [user?.id, checkAdminStatus]);
 

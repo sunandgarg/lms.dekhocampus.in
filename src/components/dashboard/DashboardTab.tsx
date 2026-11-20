@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import { RefreshCw, Building2, CalendarDays, ChevronDown, ChevronUp, User, FileText, CheckCircle2, XCircle, Clock, Users, Search, TrendingUp, Activity } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataRetentionNotice } from '@/components/ui/DataRetentionNotice';
@@ -42,7 +42,7 @@ async function fetchAllLeads(from: Date, to: Date, selectedUniId: string) {
 
   const MAX_PAGES = 10; // Cap at 10,000 leads to prevent runaway queries
   while (hasMore && page < MAX_PAGES) {
-    let query = supabase
+    let query = api
       .from('leads')
       .select('id, status, created_at, university_id, user_id, retry_count, batch_id')
       .gte('created_at', from.toISOString())
@@ -114,16 +114,16 @@ export function DashboardTab() {
       const { from, to, days } = getDateRange(datePreset, customFrom, customTo);
 
       const [{ data: unis }, filtered, { data: profiles }, { data: batches }] = await Promise.all([
-        supabase.from('universities').select('id, name'),
+        api.from('universities').select('id, name'),
         fetchAllLeads(from, to, selectedUniId),
-        supabase.from('profiles').select('id, email, full_name').limit(500),
-        supabase.from('upload_batches').select('id, university_id, file_name, total_leads, success_count, fail_count, status, created_at, user_id'),
+        api.from('profiles').select('id, email, full_name').limit(500),
+        api.from('upload_batches').select('id, university_id, file_name, total_leads, success_count, fail_count, status, created_at, user_id'),
       ]);
 
       setUniversities(unis || []);
       const uniMap = new Map((unis || []).map(u => [u.id, u.name]));
-      const profileMap = new Map((profiles || []).map(p => [p.id, p]));
-      const batchMap = new Map((batches || []).map(b => [b.id, b]));
+      const profileMap = new Map<string, any>((profiles || []).map(p => [p.id, p]));
+      const batchMap = new Map<string, any>((batches || []).map(b => [b.id, b]));
 
       const success = filtered.filter(l => isSuccess(l.status)).length;
       const failed = filtered.filter(l => isFailed(l.status)).length;

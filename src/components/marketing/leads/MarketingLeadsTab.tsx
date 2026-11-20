@@ -39,7 +39,7 @@ import {
   XCircle,
   Users
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 interface MarketingLead {
@@ -92,13 +92,13 @@ export function MarketingLeadsTab() {
     setLoading(true);
     try {
       const [leadsRes, unisRes, campaignsRes] = await Promise.all([
-        supabase
+        api
           .from('marketing_leads')
           .select('*')
           .order('created_at', { ascending: false })
           .limit(500),
-        supabase.from('universities').select('id, name').order('name'),
-        supabase.from('marketing_campaigns').select('id, name').order('name'),
+        api.from('universities').select('id, name').order('name'),
+        api.from('marketing_campaigns').select('id, name').order('name'),
       ]);
 
       if (leadsRes.error) throw leadsRes.error;
@@ -193,7 +193,7 @@ export function MarketingLeadsTab() {
       const selectedLeadData = leads.filter(l => selectedLeads.has(l.id));
       
       // Get university details
-      const { data: uni } = await supabase
+      const { data: uni } = await api
         .from('universities')
         .select('*')
         .eq('id', selectedUniversity)
@@ -202,7 +202,7 @@ export function MarketingLeadsTab() {
       if (!uni) throw new Error('University not found');
 
       // Create a batch for these leads
-      const { data: batch, error: batchError } = await supabase
+      const { data: batch, error: batchError } = await api
         .from('upload_batches')
         .insert({
           university_id: selectedUniversity,
@@ -228,14 +228,14 @@ export function MarketingLeadsTab() {
         status: 'pending',
       }));
 
-      const { error: insertError } = await supabase
+      const { error: insertError } = await api
         .from('leads')
         .insert(leadsToInsert);
 
       if (insertError) throw insertError;
 
       // Update marketing leads status
-      const { error: updateError } = await supabase
+      const { error: updateError } = await api
         .from('marketing_leads')
         .update({
           status: 'pushed',
@@ -275,7 +275,7 @@ export function MarketingLeadsTab() {
       if (bulkEditField === 'mobile') updates.mobile = bulkEditValue;
       if (bulkEditField === 'status') updates.status = bulkEditValue;
 
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_leads')
         .update(updates)
         .in('id', Array.from(selectedLeads));
@@ -297,7 +297,7 @@ export function MarketingLeadsTab() {
     if (selectedLeads.size === 0) return;
 
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_leads')
         .delete()
         .in('id', Array.from(selectedLeads));
@@ -342,7 +342,7 @@ export function MarketingLeadsTab() {
       }
 
       if (newLeads.length > 0) {
-        const { error } = await supabase.from('marketing_leads').insert(newLeads);
+        const { error } = await api.from('marketing_leads').insert(newLeads);
         if (error) {
           toast({ title: 'Error', description: 'Failed to import leads', variant: 'destructive' });
         } else {

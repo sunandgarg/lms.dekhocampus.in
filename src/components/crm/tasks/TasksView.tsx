@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Plus, 
@@ -61,8 +61,8 @@ export function TasksView() {
   const fetchData = async () => {
     try {
       const [tasksRes, contactsRes] = await Promise.all([
-        supabase.from('crm_tasks').select('*').order('due_date', { ascending: true }).limit(500),
-        supabase.from('crm_contacts').select('id, name, mobile').order('name').limit(1000),
+        api.from('crm_tasks').select('*').order('due_date', { ascending: true }).limit(500),
+        api.from('crm_contacts').select('id, name, mobile').order('name').limit(1000),
       ]);
 
       // Enrich tasks with contact info
@@ -121,12 +121,12 @@ export function TasksView() {
         contact_id: newTask.contact_id || null,
       };
 
-      const { error } = await supabase.from('crm_tasks').insert(insertData);
+      const { error } = await api.from('crm_tasks').insert(insertData);
       if (error) throw error;
 
       // Log activity if linked to contact
       if (newTask.contact_id) {
-        await supabase.from('crm_activities').insert({
+        await api.from('crm_activities').insert({
           contact_id: newTask.contact_id,
           type: 'task',
           title: `Task Created: ${newTask.title}`,
@@ -148,7 +148,7 @@ export function TasksView() {
     const isCompleting = task.status !== 'completed';
     
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('crm_tasks')
         .update({
           status: isCompleting ? 'completed' : 'pending',
@@ -161,7 +161,7 @@ export function TasksView() {
 
       // Log activity if linked to contact
       if (task.contact_id && isCompleting) {
-        await supabase.from('crm_activities').insert({
+        await api.from('crm_activities').insert({
           contact_id: task.contact_id,
           type: 'task',
           title: `Task Completed: ${task.title}`,
@@ -187,7 +187,7 @@ export function TasksView() {
 
   const deleteTask = async (taskId: string) => {
     try {
-      const { error } = await supabase.from('crm_tasks').delete().eq('id', taskId);
+      const { error } = await api.from('crm_tasks').delete().eq('id', taskId);
       if (error) throw error;
       setTasks(prev => prev.filter(t => t.id !== taskId));
       toast({ title: 'Deleted', description: 'Task removed' });

@@ -1,1 +1,0 @@
-ALTER TABLE public.url_mappings ADD COLUMN IF NOT EXISTS domain text DEFAULT NULL;

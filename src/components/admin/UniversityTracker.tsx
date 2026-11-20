@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 interface UniversityBiz {
@@ -52,7 +52,7 @@ function UniversityTrackerInner() {
   });
 
   const fetchUniversities = useCallback(async () => {
-    const { data, error } = await supabase
+    const { data, error } = await api
       .from('universities')
       .select('id, name, daily_limit, admission_commitment, contact_person_name, contact_person_mobile, contact_person_email, whatsapp_group_link, deal_price, gst_inclusive, city, state, utm_link, api_url')
       .order('name');
@@ -86,7 +86,7 @@ function UniversityTrackerInner() {
 
   const saveDetails = async () => {
     if (!editUni) return;
-    const { error } = await supabase.from('universities').update({
+    const { error } = await api.from('universities').update({
       daily_limit: form.daily_limit ? parseInt(form.daily_limit) : null,
       admission_commitment: form.admission_commitment ? parseInt(form.admission_commitment) : null,
       contact_person_name: form.contact_person_name || null,

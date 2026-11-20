@@ -12,7 +12,7 @@ import {
   Smartphone,
   Megaphone
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import {
   AreaChart,
   Area,
@@ -81,21 +81,21 @@ export function MarketingDashboard() {
   const fetchDashboardData = useCallback(async () => {
     try {
       // Fetch campaigns
-      const { data: campaigns, error: campaignsError } = await supabase
+      const { data: campaigns, error: campaignsError } = await api
         .from('marketing_campaigns')
         .select('*');
 
       if (campaignsError) throw campaignsError;
 
       // Fetch recipients with status breakdown
-      const { data: recipients, error: recipientsError } = await supabase
+      const { data: recipients, error: recipientsError } = await api
         .from('campaign_recipients')
         .select('status, sent_at, delivered_at, opened_at, clicked_at, campaign_id');
 
       if (recipientsError) throw recipientsError;
 
       // Fetch KPIs
-      const { data: kpis, error: kpisError } = await supabase
+      const { data: kpis, error: kpisError } = await api
         .from('campaign_kpis')
         .select('*')
         .gte('recorded_at', subDays(new Date(), 30).toISOString());

@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 
 export interface LmsLead {
@@ -131,14 +131,14 @@ export function AllLeadsPage() {
         // Fetch leads that are NOT from CSV upload batches
         // CSV upload batches have file_name like actual filenames (*.csv)
         // External API leads have file_name like 'API_*'
-        const { data: uploadBatchIds } = await supabase
+        const { data: uploadBatchIds } = await api
           .from("upload_batches")
           .select("id")
           .not("file_name", "like", "API_%");
 
         const excludeBatchIds = (uploadBatchIds || []).map((b) => b.id);
 
-        let query = supabase
+        let query = api
           .from("leads")
           .select("*, universities(name)")
           .order("created_at", { ascending: false })
@@ -254,7 +254,7 @@ export function AllLeadsPage() {
   const handleRetryLead = useCallback(
     async (lead: LmsLead) => {
       toast({ title: "Retrying...", description: `Retrying ${lead.name}` });
-      const { error } = await supabase.from("leads").update({ status: "pending" }).eq("id", lead.id);
+      const { error } = await api.from("leads").update({ status: "pending" }).eq("id", lead.id);
       if (error) {
         toast({ title: "Error", description: error.message, variant: "destructive" });
       } else {
@@ -271,7 +271,7 @@ export function AllLeadsPage() {
       toast({ title: "No failed leads", description: "Select failed leads to retry", variant: "destructive" });
       return;
     }
-    const { error } = await supabase.from("leads").update({ status: "pending" }).in("id", failedIds);
+    const { error } = await api.from("leads").update({ status: "pending" }).in("id", failedIds);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {

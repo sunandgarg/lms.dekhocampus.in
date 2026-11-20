@@ -1,7 +1,7 @@
 import { useState, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { 
   ArrowLeft, 
   Bot, 
@@ -45,7 +45,7 @@ const LeadScoringTab = memo(() => {
   const { data: contacts = [], isLoading } = useQuery({
     queryKey: ['crm-contacts-for-scoring'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('crm_contacts')
         .select('*')
         .order('created_at', { ascending: false })
@@ -59,7 +59,7 @@ const LeadScoringTab = memo(() => {
     setIsScoring(true);
     try {
       for (const contact of contacts) {
-        const { data } = await supabase.functions.invoke('ai-gateway', {
+        const { data } = await api.functions.invoke('ai-gateway', {
           body: {
             action: 'score_lead',
             data: { lead: contact },
@@ -67,7 +67,7 @@ const LeadScoringTab = memo(() => {
         });
 
         if (data?.success) {
-          await supabase
+          await api
             .from('crm_contacts')
             .update({
               lead_score: data.score,
@@ -207,7 +207,7 @@ const CallAnalysisTab = memo(() => {
 
     setIsAnalyzing(true);
     try {
-      const { data, error } = await supabase.functions.invoke('ai-gateway', {
+      const { data, error } = await api.functions.invoke('ai-gateway', {
         body: {
           action: 'analyze_call',
           data: { transcript, duration: 180 },
@@ -335,7 +335,7 @@ const EmailGeneratorTab = memo(() => {
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const { data, error } = await supabase.functions.invoke('ai-gateway', {
+      const { data, error } = await api.functions.invoke('ai-gateway', {
         body: {
           action: 'generate_email',
           data: {
@@ -471,7 +471,7 @@ const PredictionsTab = memo(() => {
   const { data: contacts = [] } = useQuery({
     queryKey: ['crm-contacts-for-predictions'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('crm_contacts')
         .select('*')
         .order('lead_score', { ascending: false })
@@ -484,7 +484,7 @@ const PredictionsTab = memo(() => {
   const handlePredict = async () => {
     setIsPredicting(true);
     try {
-      const { data, error } = await supabase.functions.invoke('ai-gateway', {
+      const { data, error } = await api.functions.invoke('ai-gateway', {
         body: {
           action: 'predict_enrollment',
           data: { contacts },
@@ -577,7 +577,7 @@ const OverviewTab = memo(() => {
   const { data: scoredCount = 0 } = useQuery({
     queryKey: ['ai-overview-scored'],
     queryFn: async () => {
-      const { count, error } = await supabase
+      const { count, error } = await api
         .from('crm_contacts')
         .select('id', { count: 'exact', head: true })
         .not('lead_score', 'is', null)
@@ -590,7 +590,7 @@ const OverviewTab = memo(() => {
   const { data: activitiesCount = 0 } = useQuery({
     queryKey: ['ai-overview-activities'],
     queryFn: async () => {
-      const { count, error } = await supabase
+      const { count, error } = await api
         .from('crm_activities')
         .select('id', { count: 'exact', head: true })
         .eq('type', 'call');
@@ -602,7 +602,7 @@ const OverviewTab = memo(() => {
   const { data: totalContacts = 0 } = useQuery({
     queryKey: ['ai-overview-contacts'],
     queryFn: async () => {
-      const { count, error } = await supabase
+      const { count, error } = await api
         .from('crm_contacts')
         .select('id', { count: 'exact', head: true });
       if (error) throw error;

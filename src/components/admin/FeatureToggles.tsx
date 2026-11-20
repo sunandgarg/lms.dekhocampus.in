@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent } from '@/components/ui/card';
@@ -37,7 +37,7 @@ export function FeatureToggles() {
   const { data: toggles = [], isLoading } = useQuery({
     queryKey: ['feature-toggles-admin'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('feature_toggles')
         .select('*')
         .order('sort_order');
@@ -81,7 +81,7 @@ export function FeatureToggles() {
 
   const toggleMutation = useMutation({
     mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('feature_toggles')
         .update({ is_enabled: enabled, updated_at: new Date().toISOString() })
         .eq('id', id);
@@ -100,14 +100,14 @@ export function FeatureToggles() {
       // Toggle parent
       const parent = toggles.find(t => t.feature_key === parentKey);
       if (parent) {
-        await supabase.from('feature_toggles')
+        await api.from('feature_toggles')
           .update({ is_enabled: enabled, updated_at: new Date().toISOString() })
           .eq('id', parent.id);
       }
       // Toggle all children
       const children = toggles.filter(t => t.parent_key === parentKey);
       if (children.length > 0) {
-        await supabase.from('feature_toggles')
+        await api.from('feature_toggles')
           .update({ is_enabled: enabled, updated_at: new Date().toISOString() })
           .in('id', children.map(c => c.id));
       }

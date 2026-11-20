@@ -12,12 +12,15 @@ test('lead input is saved before delivery without partner credentials', async ()
   const s3 = { send: async (command) => { writes.push(command.input); return {}; } };
   const result = await archiveAndDeliver({
     s3, bucket: 'archive', batchId,
-    input: { leadData: { phone: '123' }, apiConfig: { secretKey: 'private' } },
+    input: { leadData: { phone: '123' }, apiConfig: { secretKey: 'private' },
+      outbound: { url: 'https://partner.example/leads?key=private', headers: { Authorization: 'Bearer private' },
+        body: { name: 'Alice', secret_key: 'private' } } },
     deliver: async () => { assert.equal(writes.length, 1); return { status: 'Success' }; },
   });
   assert.deepEqual(result, { status: 'Success' });
   assert.equal(writes.length, 2);
   assert.doesNotMatch(writes[0].Body, /private/);
+  assert.match(writes[0].Body, /Alice/);
   assert.match(writes[1].Body, /Success/);
 });
 
@@ -48,7 +51,7 @@ test('source files use a safe batch-scoped key', async () => {
     s3: { send: async (command) => { saved = command.input; } },
     bucket: 'archive', batchId, filename: '../leads.csv', body: Buffer.from('name\nA'),
   });
-  assert.equal(key, `batches/${batchId}/source/.._leads.csv`);
+  assert.match(key, new RegExp(`^batches/${batchId}/source/[0-9a-f-]{36}-\\.\\._leads\\.csv$`));
   assert.equal(saved.Body.toString(), 'name\nA');
 });
 

@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Plus, Settings, Trash2, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { EMAIL_PROVIDERS, MarketingIntegration } from '@/types/marketing';
 
@@ -39,7 +39,7 @@ export function EmailChannelConfig() {
 
   const fetchIntegrations = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_integrations')
         .select('*')
         .eq('type', 'email')
@@ -75,7 +75,7 @@ export function EmailChannelConfig() {
       };
 
       if (editingIntegration) {
-        const { error } = await supabase
+        const { error } = await api
           .from('marketing_integrations')
           .update(integration)
           .eq('id', editingIntegration.id);
@@ -83,7 +83,7 @@ export function EmailChannelConfig() {
         if (error) throw error;
         toast({ title: 'Success', description: 'Integration updated!' });
       } else {
-        const { error } = await supabase
+        const { error } = await api
           .from('marketing_integrations')
           .insert(integration);
 
@@ -103,7 +103,7 @@ export function EmailChannelConfig() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_integrations')
         .delete()
         .eq('id', id);

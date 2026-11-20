@@ -6,7 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { generateShortCode, isValidUrl } from '@/utils/base62';
 
 interface BulkImportRow {
@@ -71,11 +71,11 @@ export const UrlBulkImport = memo(function UrlBulkImport() {
     setProgress(0);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await api.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
       // Create import record
-      const { data: importRecord, error: importError } = await supabase
+      const { data: importRecord, error: importError } = await api
         .from('url_bulk_imports')
         .insert({
           user_id: user.id,
@@ -131,7 +131,7 @@ export const UrlBulkImport = memo(function UrlBulkImport() {
 
         // Insert valid rows one by one (needed for individual error reporting)
         for (const item of batchInserts) {
-          const { data, error } = await supabase
+          const { data, error } = await api
             .from('url_mappings')
             .insert(item.payload)
             .select()
@@ -159,7 +159,7 @@ export const UrlBulkImport = memo(function UrlBulkImport() {
       }
 
       // Update import record
-      await supabase
+      await api
         .from('url_bulk_imports')
         .update({
           success_count: successCount,

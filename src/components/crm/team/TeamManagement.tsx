@@ -1,6 +1,6 @@
 import { useState, useEffect, memo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { 
   Plus, 
   Search, 
@@ -84,7 +84,7 @@ export const TeamManagement = memo(() => {
   const { data: teamMembers = [], isLoading } = useQuery({
     queryKey: ['team-members'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('team_members')
         .select('*')
         .order('created_at', { ascending: false });
@@ -97,7 +97,7 @@ export const TeamManagement = memo(() => {
   // Add team member mutation
   const addMemberMutation = useMutation({
     mutationFn: async (newMember: { email: string; full_name: string; [key: string]: any }) => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('team_members')
         .insert([newMember as any])
         .select()
@@ -120,7 +120,7 @@ export const TeamManagement = memo(() => {
   // Update team member mutation
   const updateMemberMutation = useMutation({
     mutationFn: async ({ id, ...updates }: Record<string, any>) => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('team_members')
         .update(updates)
         .eq('id', id)
@@ -144,7 +144,7 @@ export const TeamManagement = memo(() => {
   // Delete team member mutation
   const deleteMemberMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('team_members')
         .delete()
         .eq('id', id);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,13 +27,13 @@ export function MarketingAnalytics() {
   const { data: campaignStats } = useQuery({
     queryKey: ['campaign-stats', dateRange],
     queryFn: async () => {
-      const { data: campaigns, error } = await supabase
+      const { data: campaigns, error } = await api
         .from('marketing_campaigns')
         .select('*')
         .gte('created_at', subDays(new Date(), parseInt(dateRange)).toISOString());
       if (error) throw error;
 
-      const { data: recipients } = await supabase
+      const { data: recipients } = await api
         .from('campaign_recipients')
         .select('*');
 

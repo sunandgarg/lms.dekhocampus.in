@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,7 +52,7 @@ export function TemplateEditor() {
   const { data: templates = [], isLoading } = useQuery({
     queryKey: ['marketing-templates'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_templates')
         .select('*')
         .order('created_at', { ascending: false });
@@ -70,7 +70,7 @@ export function TemplateEditor() {
         ? { message: data.content }
         : { type: 'text', body: data.content };
 
-      const { data: result, error } = await supabase
+      const { data: result, error } = await api
         .from('marketing_templates')
         .insert([{
           name: data.name,
@@ -100,7 +100,7 @@ export function TemplateEditor() {
   // Update template status
   const updateTemplateStatus = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: TemplateStatus }) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_templates')
         .update({ status })
         .eq('id', id);
@@ -115,7 +115,7 @@ export function TemplateEditor() {
   // Delete template
   const deleteTemplate = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_templates')
         .delete()
         .eq('id', id);

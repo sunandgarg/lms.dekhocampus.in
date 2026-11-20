@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import DOMPurify from 'dompurify';
 
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
@@ -84,9 +84,9 @@ export function SMTPCampaignBuilder() {
   const fetchData = useCallback(async () => {
     try {
       const [campaignsRes, domainsRes, templatesRes] = await Promise.all([
-        supabase.from('smtp_campaigns').select('*').order('created_at', { ascending: false }),
-        supabase.from('smtp_domains').select('*').eq('verification_status', 'verified'),
-        supabase.from('smtp_templates').select('*').order('name'),
+        api.from('smtp_campaigns').select('*').order('created_at', { ascending: false }),
+        api.from('smtp_domains').select('*').eq('verification_status', 'verified'),
+        api.from('smtp_templates').select('*').order('name'),
       ]);
 
       if (campaignsRes.error) throw campaignsRes.error;
@@ -132,7 +132,7 @@ export function SMTPCampaignBuilder() {
         status: formData.send_at ? 'scheduled' : 'draft',
       };
 
-      const { error } = await supabase.from('smtp_campaigns').insert(campaign);
+      const { error } = await api.from('smtp_campaigns').insert(campaign);
 
       if (error) throw error;
       toast({ title: 'Success', description: 'Campaign created!' });
@@ -152,7 +152,7 @@ export function SMTPCampaignBuilder() {
         updates.sent_at = new Date().toISOString();
       }
 
-      const { error } = await supabase
+      const { error } = await api
         .from('smtp_campaigns')
         .update(updates)
         .eq('id', campaignId);
@@ -168,7 +168,7 @@ export function SMTPCampaignBuilder() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase.from('smtp_campaigns').delete().eq('id', id);
+      const { error } = await api.from('smtp_campaigns').delete().eq('id', id);
       if (error) throw error;
       toast({ title: 'Deleted', description: 'Campaign removed' });
       fetchData();

@@ -30,7 +30,7 @@ import {
   ExternalLink,
   Shield
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { SMS_PROVIDERS, DLT_PLATFORMS, MarketingIntegration } from '@/types/marketing';
 
@@ -60,12 +60,12 @@ export function SMSChannelConfig() {
   const fetchData = async () => {
     try {
       const [integrationsRes, dltRes] = await Promise.all([
-        supabase
+        api
           .from('marketing_integrations')
           .select('*')
           .eq('type', 'sms')
           .order('created_at', { ascending: false }),
-        supabase
+        api
           .from('dlt_entities')
           .select('*')
           .order('created_at', { ascending: false }),
@@ -105,7 +105,7 @@ export function SMSChannelConfig() {
       };
 
       if (editingIntegration) {
-        const { error } = await supabase
+        const { error } = await api
           .from('marketing_integrations')
           .update(integration)
           .eq('id', editingIntegration.id);
@@ -113,7 +113,7 @@ export function SMSChannelConfig() {
         if (error) throw error;
         toast({ title: 'Success', description: 'Integration updated!' });
       } else {
-        const { error } = await supabase
+        const { error } = await api
           .from('marketing_integrations')
           .insert(integration);
 
@@ -133,7 +133,7 @@ export function SMSChannelConfig() {
 
   const handleSaveDLT = async () => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('dlt_entities')
         .insert({
           platform: dltFormData.platform,
@@ -156,7 +156,7 @@ export function SMSChannelConfig() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_integrations')
         .delete()
         .eq('id', id);

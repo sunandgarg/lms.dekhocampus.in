@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
@@ -43,7 +43,7 @@ function ActiveTasksViewInner() {
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('upload_batches')
         .select('id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, completed_at, user_id, leads_per_minute, scheduled_at')
         .in('status', ['processing', 'pending', 'paused', 'scheduled'])
@@ -53,18 +53,18 @@ function ActiveTasksViewInner() {
       if (error) throw error;
 
       // Batch fetch university names (use cache)
-      const uniIds = [...new Set((data || []).map(b => b.university_id).filter(Boolean))];
+      const uniIds = [...new Set<string>((data || []).map(b => String(b.university_id)).filter(Boolean))];
       const uncachedUniIds = uniIds.filter(id => !uniCache.has(id));
       if (uncachedUniIds.length > 0) {
-        const { data: unis } = await supabase.from('universities').select('id, name').in('id', uncachedUniIds);
+        const { data: unis } = await api.from('universities').select('id, name').in('id', uncachedUniIds);
         (unis || []).forEach(u => uniCache.set(u.id, u.name));
       }
 
       // Batch fetch user emails (use cache)
-      const userIds = [...new Set((data || []).map(b => b.user_id).filter(Boolean))];
+      const userIds = [...new Set<string>((data || []).map(b => String(b.user_id)).filter(Boolean))];
       const uncachedUserIds = userIds.filter(id => !userCache.has(id));
       if (uncachedUserIds.length > 0) {
-        const { data: profiles } = await supabase.from('profiles').select('id, email').in('id', uncachedUserIds);
+        const { data: profiles } = await api.from('profiles').select('id, email').in('id', uncachedUserIds);
         (profiles || []).forEach(p => userCache.set(p.id, p.email || 'Unknown'));
       }
 
@@ -85,20 +85,20 @@ function ActiveTasksViewInner() {
   }, [toast]);
 
   const handlePause = useCallback(async (batchId: string) => {
-    await supabase.from('upload_batches').update({ is_paused: true, status: 'paused' }).eq('id', batchId);
+    await api.from('upload_batches').update({ is_paused: true, status: 'paused' }).eq('id', batchId);
     toast({ title: 'Paused', description: 'Batch paused successfully' });
     fetchTasks();
   }, [toast, fetchTasks]);
 
   const handleResume = useCallback(async (batchId: string) => {
-    await supabase.from('upload_batches').update({ is_paused: false, status: 'processing' }).eq('id', batchId);
-    supabase.functions.invoke('process-queue', { body: { batchId } }).catch(() => {});
+    await api.from('upload_batches').update({ is_paused: false, status: 'processing' }).eq('id', batchId);
+    api.functions.invoke('process-queue', { body: { batchId } }).catch(() => {});
     toast({ title: 'Resumed', description: 'Batch resumed' });
     fetchTasks();
   }, [toast, fetchTasks]);
 
   const handleStop = useCallback(async (batchId: string) => {
-    await supabase.from('upload_batches').update({ status: 'cancelled', is_cancelled: true, completed_at: new Date().toISOString() }).eq('id', batchId);
+    await api.from('upload_batches').update({ status: 'cancelled', is_cancelled: true, completed_at: new Date().toISOString() }).eq('id', batchId);
     toast({ title: 'Stopped', description: 'Batch cancelled' });
     fetchTasks();
   }, [toast, fetchTasks]);

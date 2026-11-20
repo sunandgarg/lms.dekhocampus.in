@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, Eye, EyeOff, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 const WEBHOOK_EVENTS = [
@@ -32,19 +32,16 @@ export function EmailSettings({ onBack }: EmailSettingsProps) {
     default_from_email: '',
     default_from_name: '',
     webhook_events: {} as Record<string, boolean>,
+    webhook_key: '',
   });
   const [showKey, setShowKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testResult, setTestResult] = useState<'success' | 'fail' | null>(null);
-  const [balance, setBalance] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const projectId =
-    import.meta.env.VITE_SUPABASE_PROJECT_ID ||
-    import.meta.env.VITE_SUPABASE_URL?.replace(/^https?:\/\//, '').split('.')[0] ||
-    '';
-  const webhookUrl = `https://${projectId}.supabase.co/functions/v1/netcore-email-webhook`;
+  const webhookUrl = settings.webhook_key
+    ? `${window.location.origin}/api/webhooks/netcore-email-webhook?key=${settings.webhook_key}`
+    : 'Save settings to generate a webhook URL';
 
   useEffect(() => {
     fetchSettings();
@@ -52,7 +49,7 @@ export function EmailSettings({ onBack }: EmailSettingsProps) {
 
   const fetchSettings = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('email_api_settings').select('*').limit(1).single();
+    const { data, error } = await api.from('email_api_settings').select('*').limit(1).single();
     if (data) {
       setSettings({
         id: data.id,
@@ -61,6 +58,7 @@ export function EmailSettings({ onBack }: EmailSettingsProps) {
         default_from_email: (data as any).default_from_email || '',
         default_from_name: (data as any).default_from_name || '',
         webhook_events: (data as any).webhook_events || {},
+        webhook_key: (data as any).webhook_key || '',
       });
     }
     setLoading(false);
@@ -74,31 +72,22 @@ export function EmailSettings({ onBack }: EmailSettingsProps) {
       default_from_email: settings.default_from_email,
       default_from_name: settings.default_from_name,
       webhook_events: settings.webhook_events,
+      webhook_key: settings.webhook_key || Array.from(crypto.getRandomValues(new Uint8Array(24)))
+        .map((byte) => byte.toString(16).padStart(2, '0')).join(''),
       updated_at: new Date().toISOString(),
     };
 
     if (settings.id) {
-      const { error } = await supabase.from('email_api_settings').update(payload).eq('id', settings.id);
+      const { error } = await api.from('email_api_settings').update(payload).eq('id', settings.id);
       if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); setSaving(false); return; }
     } else {
-      const { data, error } = await supabase.from('email_api_settings').insert(payload).select().single();
+      const { data, error } = await api.from('email_api_settings').insert(payload).select().single();
       if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); setSaving(false); return; }
       if (data) setSettings(prev => ({ ...prev, id: data.id }));
     }
     toast({ title: 'Saved', description: 'Email settings saved successfully' });
+    setSettings(prev => ({ ...prev, webhook_key: payload.webhook_key }));
     setSaving(false);
-  };
-
-  const handleTestConnection = async () => {
-    if (!settings.api_key) { toast({ title: 'Error', description: 'API key is required', variant: 'destructive' }); return; }
-    // Simulate test - in production, this would call Netcore API
-    setTestResult('success');
-    toast({ title: 'Connection successful', description: 'Netcore API is reachable' });
-  };
-
-  const refreshBalance = () => {
-    setBalance('Loading...');
-    setTimeout(() => setBalance('50,000'), 1000);
   };
 
   const toggleEvent = (key: string) => {
@@ -162,10 +151,6 @@ export function EmailSettings({ onBack }: EmailSettingsProps) {
             <p className="text-xs text-muted-foreground mt-1">Set this URL in your Netcore dashboard to receive delivery events.</p>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={handleTestConnection} className="gap-2">
-              {testResult === 'success' ? <CheckCircle className="h-4 w-4 text-green-500" /> : testResult === 'fail' ? <XCircle className="h-4 w-4 text-red-500" /> : null}
-              Test Connection
-            </Button>
             <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save Settings'}</Button>
           </div>
         </CardContent>
@@ -189,19 +174,6 @@ export function EmailSettings({ onBack }: EmailSettingsProps) {
         </CardContent>
       </Card>
 
-      {/* API Balance */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">API Balance</CardTitle>
-          <CardDescription>Your current Netcore email credit balance</CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center gap-4">
-          <div className="text-3xl font-bold text-foreground">{balance || '-'}</div>
-          <Button variant="outline" size="sm" onClick={refreshBalance} className="gap-2">
-            <RefreshCw className="h-4 w-4" /> Refresh Balance
-          </Button>
-        </CardContent>
-      </Card>
     </div>
   );
 }

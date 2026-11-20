@@ -15,7 +15,7 @@ import { Plus, Search, Eye, BarChart3, Copy, CalendarIcon, Upload, Users, Send, 
 import { format } from 'date-fns';
 
 import DOMPurify from 'dompurify';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 interface EmailCampaign {
@@ -70,13 +70,13 @@ export function EmailCampaignList() {
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('email_campaigns').select('*').order('created_at', { ascending: false });
+    const { data } = await api.from('email_campaigns').select('*').order('created_at', { ascending: false });
     setCampaigns((data || []) as EmailCampaign[]);
     setLoading(false);
   }, []);
 
   const fetchTemplates = useCallback(async () => {
-    const { data } = await supabase.from('email_templates').select('id, name, subject, content').eq('status', 'published').eq('is_active', true);
+    const { data } = await api.from('email_templates').select('id, name, subject, content').eq('status', 'published').eq('is_active', true);
     setTemplates(data || []);
   }, []);
 
@@ -112,7 +112,7 @@ export function EmailCampaignList() {
 
   const handleSendTest = async () => {
     if (!form.test_email) { toast({ title: 'Enter test email', variant: 'destructive' }); return; }
-    toast({ title: 'Test email sent', description: `Test sent to ${form.test_email}` });
+    toast({ title: 'Sending unavailable', description: 'Email delivery has not been configured for this LMS.', variant: 'destructive' });
   };
 
   const handleLaunch = async () => {
@@ -133,7 +133,7 @@ export function EmailCampaignList() {
       }).filter(r => r.email);
     }
 
-    const { data: campaign, error } = await supabase.from('email_campaigns').insert({
+    const { data: campaign, error } = await api.from('email_campaigns').insert({
       name: form.name,
       template_id: form.template_id || null,
       from_name: form.from_name,
@@ -143,7 +143,7 @@ export function EmailCampaignList() {
       content: form.content,
       schedule_type: form.schedule_type,
       scheduled_at: form.schedule_type === 'scheduled' && form.scheduled_at ? form.scheduled_at.toISOString() : null,
-      status: form.schedule_type === 'immediate' ? 'pending' : 'draft',
+      status: 'draft',
       audience_type: form.audience_type,
       total_count: recipientList.length || csvTotal,
       unique_audience_count: recipientList.length || csvTotal,
@@ -157,12 +157,12 @@ export function EmailCampaignList() {
       const rows = recipientList.map(r => ({ campaign_id: campaign.id, email: r.email, first_name: r.first_name, last_name: r.last_name, phone: r.phone }));
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
         const chunk = rows.slice(i, i + CHUNK_SIZE);
-        const { error: insertErr } = await supabase.from('email_recipients').insert(chunk);
+        const { error: insertErr } = await api.from('email_recipients').insert(chunk);
         if (insertErr) console.error(`Chunk ${i / CHUNK_SIZE} insert error:`, insertErr);
       }
     }
 
-    toast({ title: 'Campaign created', description: form.schedule_type === 'immediate' ? 'Campaign launched!' : 'Campaign scheduled!' });
+    toast({ title: 'Draft saved', description: 'Campaign delivery is not configured yet.' });
     setShowAdd(false);
     setForm({ name: '', template_id: '', from_name: '', from_email: '', reply_to: '', subject: '', content: '', schedule_type: 'immediate', scheduled_at: null, audience_type: 'csv', test_email: '' });
     setCsvFile(null); setCsvPreview([]); setCsvTotal(0);
@@ -171,15 +171,15 @@ export function EmailCampaignList() {
 
   const openAnalytics = async (c: EmailCampaign) => {
     setSelectedCampaign(c);
-    const { data: events } = await supabase.from('email_events').select('*').eq('campaign_id', c.id);
+    const { data: events } = await api.from('email_events').select('*').eq('campaign_id', c.id);
     setAnalyticsData(events || []);
-    const { data: recs } = await supabase.from('email_recipients').select('*').eq('campaign_id', c.id);
+    const { data: recs } = await api.from('email_recipients').select('*').eq('campaign_id', c.id);
     setRecipients(recs || []);
     setShowAnalytics(true);
   };
 
   const handleDuplicate = async (c: EmailCampaign) => {
-    await supabase.from('email_campaigns').insert({
+    await api.from('email_campaigns').insert({
       name: `${c.name} (Copy)`, template_id: c.template_id, from_name: c.from_name, from_email: c.from_email,
       reply_to: c.reply_to, subject: c.subject, content: c.content, schedule_type: 'immediate', status: 'draft',
       audience_type: c.audience_type, total_count: 0, unique_audience_count: 0,
@@ -447,7 +447,7 @@ export function EmailCampaignList() {
             <div className="flex items-center justify-between pt-4 border-t">
               <p className="text-sm text-muted-foreground">Final Message | Total Count: <strong>{csvTotal || 0}</strong></p>
               <Button onClick={handleLaunch} className="gap-2">
-                {form.schedule_type === 'immediate' ? 'Launch Campaign' : 'Schedule Campaign'}
+                Save Draft
               </Button>
             </div>
           </div>

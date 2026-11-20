@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -30,7 +30,7 @@ export function CRMConfigSettings() {
   const { data: stages = [], isLoading: stagesLoading } = useQuery({
     queryKey: ['pipeline-stages-config'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('pipeline_stages').select('*').order('sort_order');
+      const { data, error } = await api.from('pipeline_stages').select('*').order('sort_order');
       if (error) throw error;
       return data;
     },
@@ -40,7 +40,7 @@ export function CRMConfigSettings() {
   const { data: settingsData } = useQuery({
     queryKey: ['app-settings-crm'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('app_settings').select('*').in('key', ['lead_sources', 'cities']);
+      const { data, error } = await api.from('app_settings').select('*').in('key', ['lead_sources', 'cities']);
       if (error) throw error;
       return data || [];
     },
@@ -57,7 +57,7 @@ export function CRMConfigSettings() {
     mutationFn: async () => {
       if (!newStageName.trim()) throw new Error('Stage name required');
       const maxOrder = stages.length > 0 ? Math.max(...stages.map(s => s.sort_order)) + 1 : 0;
-      const { error } = await supabase.from('pipeline_stages').insert({
+      const { error } = await api.from('pipeline_stages').insert({
         name: newStageName.trim(),
         color: newStageColor,
         sort_order: maxOrder,
@@ -76,7 +76,7 @@ export function CRMConfigSettings() {
   // Delete stage mutation
   const deleteStageMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('pipeline_stages').delete().eq('id', id);
+      const { error } = await api.from('pipeline_stages').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -88,11 +88,11 @@ export function CRMConfigSettings() {
   // Save lead sources
   const saveSourcesMutation = useMutation({
     mutationFn: async (sources: string[]) => {
-      const { data: existing } = await supabase.from('app_settings').select('id').eq('key', 'lead_sources').single();
+      const { data: existing } = await api.from('app_settings').select('id').eq('key', 'lead_sources').single();
       if (existing) {
-        await supabase.from('app_settings').update({ value: JSON.stringify(sources) }).eq('key', 'lead_sources');
+        await api.from('app_settings').update({ value: JSON.stringify(sources) }).eq('key', 'lead_sources');
       } else {
-        await supabase.from('app_settings').insert({ key: 'lead_sources', value: JSON.stringify(sources) });
+        await api.from('app_settings').insert({ key: 'lead_sources', value: JSON.stringify(sources) });
       }
     },
     onSuccess: () => {

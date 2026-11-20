@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { 
   Phone, 
   Mail, 
@@ -34,7 +34,7 @@ export function ActivitiesView() {
 
   const fetchActivities = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('crm_activities')
         .select('*')
         .order('created_at', { ascending: false })

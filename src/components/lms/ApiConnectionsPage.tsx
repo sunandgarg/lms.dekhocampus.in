@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Copy, Plus, Eye, EyeOff, Key, Loader2, Check, Trash2, RefreshCw } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 
 interface ApiKeyRow {
   id: string;
@@ -53,15 +53,14 @@ export function ApiConnectionsPage() {
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState('');
 
-  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-  const endpointUrl = `https://${projectId}.supabase.co/functions/v1/receive-lead`;
+  const endpointUrl = `${window.location.origin}/api/inbound/lead`;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [keysRes, uniRes] = await Promise.all([
-        supabase.from('university_api_keys').select('*, universities(name)').order('created_at', { ascending: false }),
-        supabase.from('universities').select('id, name').order('name'),
+        api.from('university_api_keys').select('*, universities(name)').order('created_at', { ascending: false }),
+        api.from('universities').select('id, name').order('name'),
       ]);
 
       if (keysRes.data) {
@@ -104,7 +103,7 @@ export function ApiConnectionsPage() {
       let key = 'lms_';
       for (let i = 0; i < 24; i++) key += chars[Math.floor(Math.random() * chars.length)];
 
-      const { error } = await supabase.from('university_api_keys').insert({
+      const { error } = await api.from('university_api_keys').insert({
         name: newName,
         api_key: key,
         university_id: selectedUniId,
@@ -124,13 +123,13 @@ export function ApiConnectionsPage() {
   };
 
   const toggleKeyStatus = async (id: string, current: boolean) => {
-    await supabase.from('university_api_keys').update({ is_active: !current }).eq('id', id);
+    await api.from('university_api_keys').update({ is_active: !current }).eq('id', id);
     fetchData();
   };
 
   const deleteKey = async (id: string) => {
     if (!confirm('Delete this API key?')) return;
-    await supabase.from('university_api_keys').delete().eq('id', id);
+    await api.from('university_api_keys').delete().eq('id', id);
     fetchData();
     toast({ title: 'API Key Deleted' });
   };

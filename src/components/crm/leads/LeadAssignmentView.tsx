@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Plus, 
@@ -67,7 +67,7 @@ export function LeadAssignmentView() {
 
   const fetchRules = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('lead_assignment_rules')
         .select('*')
         .order('priority', { ascending: false });
@@ -88,7 +88,7 @@ export function LeadAssignmentView() {
     }
 
     try {
-      const { error } = await supabase.from('lead_assignment_rules').insert([{
+      const { error } = await api.from('lead_assignment_rules').insert([{
         name: newRule.name,
         description: newRule.description || null,
         assignment_type: newRule.assignment_type,
@@ -118,7 +118,7 @@ export function LeadAssignmentView() {
 
   const toggleRuleActive = async (ruleId: string, isActive: boolean) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('lead_assignment_rules')
         .update({ is_active: isActive })
         .eq('id', ruleId);
@@ -132,7 +132,7 @@ export function LeadAssignmentView() {
 
   const deleteRule = async (ruleId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('lead_assignment_rules')
         .delete()
         .eq('id', ruleId);

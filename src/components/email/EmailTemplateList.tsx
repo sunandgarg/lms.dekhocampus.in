@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Search, Eye, Pencil, Trash2, Copy } from 'lucide-react';
 import DOMPurify from 'dompurify';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 interface EmailTemplate {
@@ -41,7 +41,7 @@ export function EmailTemplateList() {
 
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('email_templates').select('*').order('created_at', { ascending: false });
+    const { data, error } = await api.from('email_templates').select('*').order('created_at', { ascending: false });
     if (!error) setTemplates((data || []) as EmailTemplate[]);
     setLoading(false);
   }, []);
@@ -68,11 +68,11 @@ export function EmailTemplateList() {
     const payload = { name: form.name, category: form.category || null, subject: form.subject || null, content: form.content || null, is_active: form.is_active, status };
 
     if (editingId) {
-      const { error } = await supabase.from('email_templates').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', editingId);
+      const { error } = await api.from('email_templates').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', editingId);
       if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
       toast({ title: 'Updated', description: 'Template updated successfully' });
     } else {
-      const { error } = await supabase.from('email_templates').insert(payload);
+      const { error } = await api.from('email_templates').insert(payload);
       if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
       toast({ title: 'Created', description: 'Template created successfully' });
     }
@@ -82,19 +82,19 @@ export function EmailTemplateList() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this template?')) return;
-    await supabase.from('email_templates').delete().eq('id', id);
+    await api.from('email_templates').delete().eq('id', id);
     toast({ title: 'Deleted', description: 'Template deleted' });
     fetchTemplates();
   };
 
   const handleDuplicate = async (t: EmailTemplate) => {
-    await supabase.from('email_templates').insert({ name: `${t.name} (Copy)`, category: t.category, subject: t.subject, content: t.content, is_active: false, status: 'draft' });
+    await api.from('email_templates').insert({ name: `${t.name} (Copy)`, category: t.category, subject: t.subject, content: t.content, is_active: false, status: 'draft' });
     toast({ title: 'Duplicated', description: 'Template duplicated as draft' });
     fetchTemplates();
   };
 
   const toggleActive = async (t: EmailTemplate) => {
-    await supabase.from('email_templates').update({ is_active: !t.is_active }).eq('id', t.id);
+    await api.from('email_templates').update({ is_active: !t.is_active }).eq('id', t.id);
     fetchTemplates();
   };
 

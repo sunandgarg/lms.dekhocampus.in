@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select';
 import { Plus, FileText, Edit, Trash2, Copy, Eye, Code } from 'lucide-react';
 import DOMPurify from 'dompurify';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 
 interface SMTPTemplate {
@@ -58,7 +58,7 @@ export function SMTPTemplates() {
 
   const fetchTemplates = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('smtp_templates')
         .select('*')
         .order('name');
@@ -95,7 +95,7 @@ export function SMTPTemplates() {
       };
 
       if (editingTemplate) {
-        const { error } = await supabase
+        const { error } = await api
           .from('smtp_templates')
           .update(template)
           .eq('id', editingTemplate.id);
@@ -103,7 +103,7 @@ export function SMTPTemplates() {
         if (error) throw error;
         toast({ title: 'Success', description: 'Template updated!' });
       } else {
-        const { error } = await supabase
+        const { error } = await api
           .from('smtp_templates')
           .insert(template);
 
@@ -137,7 +137,7 @@ export function SMTPTemplates() {
 
   const handleDuplicate = async (template: SMTPTemplate) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('smtp_templates')
         .insert({
           name: `${template.name} (Copy)`,
@@ -163,7 +163,7 @@ export function SMTPTemplates() {
     const confirmed = window.confirm('Are you sure you want to delete this template?');
     if (!confirmed) return;
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('smtp_templates')
         .delete()
         .eq('id', id);

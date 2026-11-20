@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -55,7 +55,7 @@ export function CampaignBuilder() {
   const { data: campaigns = [], isLoading } = useQuery({
     queryKey: ['marketing-campaigns'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_campaigns')
         .select('*, marketing_templates(*)')
         .order('created_at', { ascending: false }) as any;
@@ -68,7 +68,7 @@ export function CampaignBuilder() {
   const { data: templates = [] } = useQuery({
     queryKey: ['marketing-templates'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_templates')
         .select('*')
         .eq('status', 'active');
@@ -80,7 +80,7 @@ export function CampaignBuilder() {
   // Create campaign
   const createCampaign = useMutation({
     mutationFn: async (data: typeof newCampaign) => {
-      const { data: result, error } = await supabase
+      const { data: result, error } = await api
         .from('marketing_campaigns')
         .insert([{
           name: data.name,
@@ -115,7 +115,7 @@ export function CampaignBuilder() {
   // Update campaign
   const updateCampaign = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<MarketingCampaign> }) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_campaigns')
         .update(updates as any)
         .eq('id', id);
@@ -130,7 +130,7 @@ export function CampaignBuilder() {
   // Delete campaign
   const deleteCampaign = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_campaigns')
         .delete()
         .eq('id', id);

@@ -3,7 +3,7 @@ import { Download, Upload, Database, Loader2, AlertTriangle } from "lucide-react
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/integrations/api/client";
 import { useToast } from "@/hooks/use-toast";
 
 function DbImportExportInner() {
@@ -17,28 +17,19 @@ function DbImportExportInner() {
   const handleExport = useCallback(async () => {
     setExporting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("db-import-export", {
-        body: { action: "export" },
-      });
-      if (error) throw error;
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const response = await fetch('/api/db/export');
+      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+      const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `db-export-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      const tableCount = data?.table_count ?? Object.keys(data?.tables || {}).length;
-      const totalRows = data?.total_rows ?? Object.values(data?.tables || {}).reduce(
-        (s: number, r: any) => s + (Array.isArray(r) ? r.length : 0),
-        0,
-      );
-      const errCount = Object.keys(data?.errors || {}).length;
       toast({
         title: "Export Complete",
-        description: `${tableCount} tables, ${totalRows} rows${errCount ? `, ${errCount} table errors` : ""}`,
+        description: 'Application data downloaded',
       });
-      if (errCount) console.warn("Export table errors:", data.errors);
     } catch (e: any) {
       toast({ title: "Export Failed", description: e.message || String(e), variant: "destructive" });
     } finally {
@@ -87,13 +78,14 @@ function DbImportExportInner() {
           continue;
         }
 
-        const ROWS_PER_CALL = 2000;
+        const ROWS_PER_CALL = 100;
         let tableInserted = 0;
         let tableErr: string | undefined;
         for (let j = 0; j < rows.length; j += ROWS_PER_CALL) {
           const slice = rows.slice(j, j + ROWS_PER_CALL);
-          const { data, error } = await supabase.functions.invoke("db-import-export", {
-            body: { action: "import", mode, data: { tables: { [t]: slice } } },
+          const { data, error } = await api.functions.invoke("db-import-export", {
+            body: { action: "import", mode: mode === 'replace' && j > 0 ? 'upsert' : mode,
+              data: { tables: { [t]: slice } } },
           });
           if (error) {
             tableErr = error.message || String(error);
@@ -136,10 +128,10 @@ function DbImportExportInner() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
           <Database className="h-5 w-5 text-primary" />
-          Full Database Import / Export
+          Application Data Import / Export
         </CardTitle>
         <CardDescription>
-          Export ALL tables (every column included) as a single JSON, or restore from a previous export.
+          Export application records as JSON or restore records from an export. User accounts are managed separately.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -188,7 +180,7 @@ function DbImportExportInner() {
           </div>
           {mode === "replace" && (
             <div className="flex items-center gap-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive">
-              <AlertTriangle className="h-4 w-4" /> Replace mode will DELETE all rows in each imported table first.
+                <AlertTriangle className="h-4 w-4" /> Replace mode deletes existing rows in selected tables. Lead history is protected.
             </div>
           )}
           <Button onClick={handleImport} disabled={importing || !file}>

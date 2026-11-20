@@ -17,7 +17,7 @@ import {
   Plus, Settings, Trash2, CheckCircle, XCircle, RefreshCw, 
   Copy, Shield, Mail, Globe, Key, AlertTriangle, Zap, Server
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
@@ -60,7 +60,7 @@ export function SMTPChannelConfig() {
 
   const fetchDomains = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('smtp_domains')
         .select('*')
         .order('created_at', { ascending: false });
@@ -92,7 +92,7 @@ export function SMTPChannelConfig() {
     try {
       const dns = generateDNSRecords(formData.domain);
       
-      const { error } = await supabase
+      const { error } = await api
         .from('smtp_domains')
         .insert({
           domain: formData.domain,
@@ -121,7 +121,7 @@ export function SMTPChannelConfig() {
   const handleVerify = async (domain: SMTPDomain) => {
     try {
       // Simulate DNS verification
-      await supabase
+      await api
         .from('smtp_domains')
         .update({ verification_status: 'verifying' })
         .eq('id', domain.id);
@@ -133,7 +133,7 @@ export function SMTPChannelConfig() {
         // For demo, randomly succeed or need more time
         const verified = Math.random() > 0.3;
         
-        await supabase
+        await api
           .from('smtp_domains')
           .update({ 
             verification_status: verified ? 'verified' : 'pending',
@@ -160,7 +160,7 @@ export function SMTPChannelConfig() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('smtp_domains')
         .delete()
         .eq('id', id);

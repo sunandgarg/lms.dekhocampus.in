@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Phone, 
@@ -76,7 +76,7 @@ export function LeadCallLogger({ contact, onCallLogged }: LeadCallLoggerProps) {
 
   const fetchCallLogs = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('crm_activities')
         .select('*')
         .eq('contact_id', contact.id)
@@ -109,7 +109,7 @@ export function LeadCallLogger({ contact, onCallLogged }: LeadCallLoggerProps) {
       const outcome = CALL_OUTCOMES.find(o => o.value === callData.outcome);
       
       // Log the call activity
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: contact.id,
         type: 'call',
         title: `Call: ${outcome?.label || callData.outcome}`,
@@ -132,7 +132,7 @@ export function LeadCallLogger({ contact, onCallLogged }: LeadCallLoggerProps) {
         updateData.next_follow_up = callData.nextFollowUp;
       }
 
-      await supabase
+      await api
         .from('crm_contacts')
         .update(updateData)
         .eq('id', contact.id);

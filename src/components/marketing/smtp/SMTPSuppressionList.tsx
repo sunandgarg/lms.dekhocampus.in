@@ -27,7 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Plus, Search, Trash2, Upload, Download, AlertTriangle, XCircle, Mail } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
@@ -58,7 +58,7 @@ export function SMTPSuppressionList() {
 
   const fetchEntries = useCallback(async () => {
     try {
-      let query = supabase
+      let query = api
         .from('smtp_suppression_list')
         .select('*')
         .order('created_at', { ascending: false });
@@ -87,7 +87,7 @@ export function SMTPSuppressionList() {
     if (!formData.email) return;
 
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('smtp_suppression_list')
         .insert({
           email: formData.email.toLowerCase().trim(),
@@ -131,7 +131,7 @@ export function SMTPSuppressionList() {
         notes: 'Bulk import',
       }));
 
-      const { error } = await supabase
+      const { error } = await api
         .from('smtp_suppression_list')
         .upsert(inserts, { onConflict: 'email,reason', ignoreDuplicates: true });
 
@@ -149,7 +149,7 @@ export function SMTPSuppressionList() {
 
   const handleRemove = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await api
         .from('smtp_suppression_list')
         .delete()
         .eq('id', id);

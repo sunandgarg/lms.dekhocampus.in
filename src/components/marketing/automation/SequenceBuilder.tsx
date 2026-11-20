@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,7 +56,7 @@ export function SequenceBuilder() {
   const { data: sequences = [], isLoading } = useQuery({
     queryKey: ['marketing-sequences'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_sequences')
         .select('*')
         .order('created_at', { ascending: false }) as any;
@@ -70,7 +70,7 @@ export function SequenceBuilder() {
     queryKey: ['sequence-steps', selectedSequence?.id],
     queryFn: async () => {
       if (!selectedSequence?.id) return [];
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_sequence_steps')
         .select('*')
         .eq('sequence_id', selectedSequence.id)
@@ -84,7 +84,7 @@ export function SequenceBuilder() {
   // Create sequence mutation
   const createSequence = useMutation({
     mutationFn: async (data: Partial<MarketingSequence>) => {
-      const { data: result, error } = await supabase
+      const { data: result, error } = await api
         .from('marketing_sequences')
         .insert([{
           name: data.name,
@@ -114,7 +114,7 @@ export function SequenceBuilder() {
   // Add step mutation
   const addStep = useMutation({
     mutationFn: async ({ sequenceId, stepType }: { sequenceId: string; stepType: StepType }) => {
-      const { data, error } = await supabase
+      const { data, error } = await api
         .from('marketing_sequence_steps')
         .insert([{
           sequence_id: sequenceId,
@@ -138,7 +138,7 @@ export function SequenceBuilder() {
   // Update sequence status
   const updateSequenceStatus = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_sequences')
         .update({ status })
         .eq('id', id);
@@ -153,7 +153,7 @@ export function SequenceBuilder() {
   // Delete step mutation
   const deleteStep = useMutation({
     mutationFn: async (stepId: string) => {
-      const { error } = await supabase
+      const { error } = await api
         .from('marketing_sequence_steps')
         .delete()
         .eq('id', stepId);
@@ -169,7 +169,7 @@ export function SequenceBuilder() {
   const createFromTemplate = useMutation({
     mutationFn: async (template: typeof SEQUENCE_TEMPLATES[0]) => {
       // Create sequence
-      const { data: sequence, error: seqError } = await supabase
+      const { data: sequence, error: seqError } = await api
         .from('marketing_sequences')
         .insert([{
           name: template.name,
@@ -197,7 +197,7 @@ export function SequenceBuilder() {
         is_active: step.is_active,
       }));
 
-      const { error: stepsError } = await supabase
+      const { error: stepsError } = await api
         .from('marketing_sequence_steps')
         .insert(stepsToInsert as any);
       if (stepsError) throw stepsError;

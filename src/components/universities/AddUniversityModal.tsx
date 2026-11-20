@@ -15,7 +15,7 @@ import {
   columnMappingToPayloadFields,
   downloadSampleCSV,
 } from "./PayloadFieldsEditor";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/integrations/api/client";
 import { ImportConfigZone, UniversityExport } from "./UniversityImportExport";
 import { MultiPushDefaultsEditor } from "./MultiPushDefaultsEditor";
 import { CustomHeadersEditor } from "./CustomHeadersEditor";
@@ -219,7 +219,7 @@ export const AddUniversityModal = forwardRef<HTMLDivElement, AddUniversityModalP
 
     try {
       const columnMapping = payloadFieldsToColumnMapping(payloadFields);
-      const { data, error } = await supabase.functions.invoke("test-api", {
+      const { data, error } = await api.functions.invoke("test-api", {
         body: {
           apiUrl: formData.apiUrl,
           secretKey: formData.secretKey,

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { Download, FileSpreadsheet, Loader2 } from 'lucide-react';
 
@@ -46,7 +46,7 @@ export function LeadExport({ universities, stages }: LeadExportProps) {
   const handleExport = async () => {
     setExporting(true);
     try {
-      let query = supabase.from('crm_contacts').select('*');
+      let query = api.from('crm_contacts').select('*');
       
       if (universityFilter !== 'all') {
         query = query.eq('university_id', universityFilter);

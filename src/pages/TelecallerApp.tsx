@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -90,12 +90,12 @@ export default function TelecallerApp() {
   const fetchData = useCallback(async () => {
     try {
       const [leadsRes, stagesRes] = await Promise.all([
-        supabase
+        api
           .from('crm_contacts')
           .select('*')
           .order('next_follow_up', { ascending: true, nullsFirst: false })
           .limit(100),
-        supabase.from('pipeline_stages').select('*').order('sort_order')
+        api.from('pipeline_stages').select('*').order('sort_order')
       ]);
 
       const leadsWithStages = (leadsRes.data || []).map(lead => ({
@@ -108,7 +108,7 @@ export default function TelecallerApp() {
 
       // Calculate today's stats
       const today = new Date().toISOString().split('T')[0];
-      const { data: todayLogs } = await supabase
+      const { data: todayLogs } = await api
         .from('crm_activities')
         .select('*')
         .eq('type', 'call')
@@ -133,7 +133,7 @@ export default function TelecallerApp() {
     const today = new Date();
     today.setDate(today.getDate() - 7);
     
-    const { data } = await supabase
+    const { data } = await api
       .from('crm_activities')
       .select('*')
       .eq('type', 'call')
@@ -164,7 +164,7 @@ export default function TelecallerApp() {
     try {
       const outcome = CALL_OUTCOMES.find(o => o.value === callData.outcome);
       
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: selectedLead.id,
         type: 'call',
         title: `Call: ${outcome?.label || callData.outcome}`,
@@ -187,7 +187,7 @@ export default function TelecallerApp() {
         updateData.next_follow_up = callData.nextFollowUp;
       }
 
-      await supabase
+      await api
         .from('crm_contacts')
         .update(updateData)
         .eq('id', selectedLead.id);
@@ -208,13 +208,13 @@ export default function TelecallerApp() {
 
   const handleStageChange = async (contactId: string, stageId: string) => {
     try {
-      await supabase
+      await api
         .from('crm_contacts')
         .update({ stage_id: stageId, updated_at: new Date().toISOString() })
         .eq('id', contactId);
 
       const stage = stages.find(s => s.id === stageId);
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: contactId,
         type: 'stage_change',
         title: `Stage changed to ${stage?.name}`,

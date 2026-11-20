@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { User, Session } from '@/integrations/api/client';
+import { api } from '@/integrations/api/client';
 
 interface AuthState {
   user: User | null;
@@ -25,7 +25,7 @@ export function useAuth() {
     let mounted = true;
 
     // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription } } = api.auth.onAuthStateChange(
       (event, session) => {
         if (!mounted) return;
 
@@ -36,7 +36,7 @@ export function useAuth() {
         // unless the user actually changed (login/logout)
         if (event === 'TOKEN_REFRESHED' && !userChanged && isInitializedRef.current) {
           // Silently update session without causing re-render
-          // Components that need fresh tokens should use supabase.auth.getSession()
+          // Components that need fresh session state should call the auth API.
           return;
         }
 
@@ -55,7 +55,7 @@ export function useAuth() {
     // Check for existing session
     const initializeAuth = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        const { data: { session }, error } = await api.auth.getSession();
 
         if (!mounted) return;
 
@@ -101,7 +101,7 @@ export function useAuth() {
   const signOut = useCallback(async () => {
     try {
       setState(prev => ({ ...prev, loading: true }));
-      const { error } = await supabase.auth.signOut();
+      const { error } = await api.auth.signOut();
       if (error) throw error;
 
       userIdRef.current = null;
@@ -123,7 +123,7 @@ export function useAuth() {
 
   const refreshSession = useCallback(async () => {
     try {
-      const { data: { session }, error } = await supabase.auth.refreshSession();
+      const { data: { session }, error } = await api.auth.refreshSession();
       if (error) throw error;
 
       // Only update if user actually changed

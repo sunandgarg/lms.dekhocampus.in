@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { Mail, Lock, LogIn, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import logo from '@/assets/logo.png';
 
@@ -17,7 +17,7 @@ const Auth = () => {
 
   const checkExistingSession = useCallback(async () => {
     try {
-      const { data: { session }, error } = await supabase.auth.getSession();
+      const { data: { session }, error } = await api.auth.getSession();
       if (error) {
         console.error('Session check error:', error);
       }
@@ -34,7 +34,7 @@ const Auth = () => {
   useEffect(() => {
     let mounted = true;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription } } = api.auth.onAuthStateChange(
       (event, session) => {
         if (!mounted) return;
         if (session?.user) {
@@ -64,7 +64,7 @@ const Auth = () => {
 
     setLoading(true);
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({ 
+      const { error: signInError } = await api.auth.signInWithPassword({
         email: email.trim().toLowerCase(), 
         password 
       });

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/integrations/api/client';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Mail, 
@@ -55,7 +55,7 @@ export function CommunicationPanel({ contact, onActivityLogged }: CommunicationP
     setIsSending(true);
     try {
       // Log the email activity
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: contact.id,
         type: 'email',
         title: `Email: ${emailSubject}`,
@@ -64,7 +64,7 @@ export function CommunicationPanel({ contact, onActivityLogged }: CommunicationP
       });
 
       // Update last contacted
-      await supabase
+      await api
         .from('crm_contacts')
         .update({ last_contacted_at: new Date().toISOString() })
         .eq('id', contact.id);
@@ -94,7 +94,7 @@ export function CommunicationPanel({ contact, onActivityLogged }: CommunicationP
     setIsSending(true);
     try {
       // Log the SMS activity
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: contact.id,
         type: 'sms',
         title: 'SMS Sent',
@@ -103,7 +103,7 @@ export function CommunicationPanel({ contact, onActivityLogged }: CommunicationP
       });
 
       // Update last contacted
-      await supabase
+      await api
         .from('crm_contacts')
         .update({ last_contacted_at: new Date().toISOString() })
         .eq('id', contact.id);
@@ -132,7 +132,7 @@ export function CommunicationPanel({ contact, onActivityLogged }: CommunicationP
     setIsSending(true);
     try {
       // Log the WhatsApp activity
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: contact.id,
         type: 'whatsapp',
         title: 'WhatsApp Message',
@@ -141,7 +141,7 @@ export function CommunicationPanel({ contact, onActivityLogged }: CommunicationP
       });
 
       // Update last contacted
-      await supabase
+      await api
         .from('crm_contacts')
         .update({ last_contacted_at: new Date().toISOString() })
         .eq('id', contact.id);
@@ -199,10 +199,10 @@ export function CommunicationPanel({ contact, onActivityLogged }: CommunicationP
         });
       }
 
-      await supabase.from('crm_activities').insert(activities);
+      await api.from('crm_activities').insert(activities);
 
       // Update last contacted
-      await supabase
+      await api
         .from('crm_contacts')
         .update({ last_contacted_at: new Date().toISOString() })
         .eq('id', contact.id);
@@ -230,7 +230,7 @@ export function CommunicationPanel({ contact, onActivityLogged }: CommunicationP
   const initiateCall = async () => {
     try {
       // Log call initiation
-      await supabase.from('crm_activities').insert({
+      await api.from('crm_activities').insert({
         contact_id: contact.id,
         type: 'call',
         title: 'Call Initiated',
