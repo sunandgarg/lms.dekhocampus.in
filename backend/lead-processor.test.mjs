@@ -51,3 +51,9 @@ test('a failed S3 request archive prevents partner delivery', async () => {
     assert.ok(!calls.some((sql) => sql.includes('INSERT INTO lms_transactions')));
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('a queued lead without a batch owner cannot reach the partner', async () => {
+  await assert.rejects(processLead({ db: {}, s3: {}, bucket: 'test-bucket',
+    task: { universityId, batchId, leadData: { name: 'Alice' } },
+  }), (error) => error.status === 409 && /owner is missing/.test(error.message));
+});

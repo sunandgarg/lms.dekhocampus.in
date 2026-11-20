@@ -24,3 +24,15 @@ test('team users cannot edit university configuration', async () => {
   const db = { execute: async () => [[{ data: { permission: 'lead-push.upload' } }]] };
   await assert.rejects(userRecords(db, user, { table: 'universities', action: 'update', values: { status: 'disabled' } }), /Access denied/);
 });
+
+test('administrator uploads are owned by the signed-in administrator', async () => {
+  const admin = { id: '7c94e1dd-c102-48cc-894b-c72e147c6a53', role: 'super_admin' };
+  let saved;
+  const db = { execute: async (sql, values) => {
+    if (sql.startsWith('INSERT INTO lms_records')) saved = JSON.parse(values[2]);
+    return [[]];
+  } };
+  await userRecords(db, admin, { table: 'upload_batches', action: 'insert',
+    values: { university_id: 'd761817d-acba-4aad-bd2f-f173502996d7', status: 'uploading', total_leads: 1 } });
+  assert.equal(saved.user_id, admin.id);
+});

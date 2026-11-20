@@ -173,6 +173,11 @@ async function deliverPartner(task, config, db, outbound) {
 
 export async function processLead({ db, s3, bucket, task, userId }) {
   if (!bucket) throw new Error('Archive bucket is not configured');
+  if (!userId) {
+    const error = new Error('Batch owner is missing; assign an owner before delivery');
+    error.status = 409;
+    throw error;
+  }
   if (!task || typeof task !== 'object' || !task.batchId || !task.universityId || !task.leadData || typeof task.leadData !== 'object') {
     const error = new Error('Invalid lead task'); error.status = 400; throw error;
   }

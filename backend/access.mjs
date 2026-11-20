@@ -43,7 +43,14 @@ function hideCredentials(result) {
 }
 
 export async function userRecords(db, user, input) {
-  if (isAdmin(user)) return executeRecords(db, input);
+  if (isAdmin(user)) {
+    if (input?.table === 'upload_batches' && input.action === 'insert') {
+      const values = Array.isArray(input.values) ? input.values : [input.values];
+      if (values.some((row) => !row || typeof row !== 'object' || Array.isArray(row))) forbidden();
+      return executeRecords(db, { ...input, values: values.map((row) => ({ ...row, user_id: user.id })) });
+    }
+    return executeRecords(db, input);
+  }
   if (!input || typeof input !== 'object') forbidden();
   const query = { ...input, filters: [...(input.filters || [])] };
   const action = query.action || 'select';
