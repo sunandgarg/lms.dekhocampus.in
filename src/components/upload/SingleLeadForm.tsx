@@ -134,7 +134,7 @@ export function SingleLeadForm({ university, onClose, onSuccess }: SingleLeadFor
 
   const [formData, setFormData] = useState<Record<string, string>>(getInitialFormData);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<{ status: 'success' | 'fail'; message: string; response?: string } | null>(null);
+  const [result, setResult] = useState<{ status: 'success' | 'duplicate' | 'fail'; message: string; response?: string } | null>(null);
   const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
   const safeResultResponse = result ? normalizeSingleLeadResponse(result.response) : '';
 
@@ -299,6 +299,7 @@ export function SingleLeadForm({ university, onClose, onSuccess }: SingleLeadFor
     setIsSubmitting(true);
     setResult(null);
 
+    let batchId: string | null = null;
     try {
       // Create a single-lead batch
       const { data: batch, error: batchError } = await api
@@ -307,12 +308,13 @@ export function SingleLeadForm({ university, onClose, onSuccess }: SingleLeadFor
           university_id: university.id,
           file_name: `Single Lead - ${formData.name || formData.email}`,
           total_leads: 1,
-          status: 'processing',
+          status: 'uploading',
         })
         .select()
         .single();
 
       if (batchError) throw batchError;
+      batchId = batch.id;
 
       // Build extra data for custom fields
       const extraData: Record<string, string> = {};
@@ -331,43 +333,47 @@ export function SingleLeadForm({ university, onClose, onSuccess }: SingleLeadFor
         }
       });
 
-      // Process lead directly. Lead Push does not store individual lead rows.
-      const { data: processResult, error: processError } = await api.functions.invoke('process-lead', {
-        body: {
-          universityId: university.id,
-          batchId: batch.id,
-          leadData: { ...formData, ...extraData },
-          apiConfig: {
-            apiUrl: university.api_url,
-            secretKey: university.secret_key,
-            collegeId: university.college_id,
-            source: formData.leadSource,
-            medium: formData.leadMedium,
-            campaign: formData.leadCampaign,
-            apiType: university.api_type || 'nopaperforms',
-            columnMapping: university.column_mapping || {},
-          },
-        },
+      const leadData = { ...formData, ...extraData };
+      const columns = Object.keys(leadData);
+      const csvCell = (value: string) => `"${String(value || '').replace(/"/g, '""')}"`;
+      const sourceCsv = columns.map(csvCell).join(',') + '\n' + columns.map((key) => csvCell(leadData[key])).join(',') + '\n';
+      const archived = await fetch(`/api/batches/${batch.id}/source`, {
+        method: 'POST', headers: { 'Content-Type': 'text/csv', 'X-Filename': 'single-lead.csv' }, body: sourceCsv,
       });
+      if (!archived.ok) throw new Error('Could not archive the lead source. No lead was sent.');
 
-      if (processError) throw processError;
+      // The server owns delivery after this point, including if the browser closes.
+      const queued = await fetch(`/api/batches/${batch.id}/queue`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks: [{ index: 0, leadData, apiConfig: {
+          columnMapping: university.column_mapping || {},
+        } }] }),
+      });
+      if (!queued.ok) throw new Error('Could not save the lead to the server queue. No lead was sent.');
+      const sealed = await fetch(`/api/batches/${batch.id}/queue`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ finalize: true }),
+      });
+      if (!sealed.ok) throw new Error('Could not start the saved lead. Check Upload History before retrying.');
 
-      // Update batch status and counts
-      const normalizedStatus = normalizeSingleLeadStatus(processResult?.status);
-      const normalizedResponse = normalizeSingleLeadResponse(processResult?.response);
-      const isSuccess = normalizedStatus === 'Success';
-      const isDuplicate = normalizedStatus === 'Duplicate';
-      await api
-        .from('upload_batches')
-        .update({ 
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-          success_count: isSuccess ? 1 : 0,
-          duplicate_count: isDuplicate ? 1 : 0,
-          fail_count: isSuccess || isDuplicate ? 0 : 1,
-          processed_count: 1,
-        })
-        .eq('id', batch.id);
+      let finalBatch: any = null;
+      for (let attempt = 0; attempt < 330; attempt++) {
+        const { data, error } = await api.from('upload_batches')
+          .select('status, error_message').eq('id', batch.id).single();
+        if (error) throw error;
+        finalBatch = data;
+        if (['completed', 'failed', 'cancelled'].includes(String(data?.status))) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      if (!['completed', 'failed', 'cancelled'].includes(String(finalBatch?.status))) {
+        setResult({ status: 'fail', message: 'Still processing on the server. Check Upload History for the result.' });
+        return;
+      }
+      const { data: savedLead, error: leadError } = await api.from('leads')
+        .select('status, api_response').eq('batch_id', batch.id).limit(1).single();
+      if (leadError && finalBatch.status === 'completed') throw leadError;
+      const normalizedStatus = normalizeSingleLeadStatus(savedLead?.status);
+      const normalizedResponse = normalizeSingleLeadResponse(savedLead?.api_response || finalBatch.error_message);
 
       // Show result
       if (normalizedStatus === 'Success') {
@@ -392,8 +398,10 @@ export function SingleLeadForm({ university, onClose, onSuccess }: SingleLeadFor
             onClose();
           }, 1500);
         }
+      } else if (normalizedStatus === 'Duplicate') {
+        setResult({ status: 'duplicate', message: 'This lead already exists at the partner.', response: normalizedResponse });
       } else {
-        let errorMessage = 'Lead submission failed';
+        let errorMessage = finalBatch.error_message || normalizedResponse || 'Lead submission failed';
         try {
           const responseJson = JSON.parse(normalizedResponse || '{}');
           errorMessage = responseJson.message || responseJson.error || errorMessage;
@@ -409,6 +417,7 @@ export function SingleLeadForm({ university, onClose, onSuccess }: SingleLeadFor
       }
     } catch (error) {
       console.error('Error submitting lead:', error);
+      if (batchId) await api.from('upload_batches').update({ status: 'failed', error_message: String(error) }).eq('id', batchId).eq('status', 'uploading');
       setResult({ status: 'fail', message: String(error) });
     } finally {
       setIsSubmitting(false);
@@ -486,15 +495,17 @@ export function SingleLeadForm({ university, onClose, onSuccess }: SingleLeadFor
           {/* Result Banner */}
           {result && (
             <div className={`p-4 rounded-lg flex items-start gap-3 ${
-              result.status === 'success' ? 'bg-success/10 border border-success/20' : 'bg-destructive/10 border border-destructive/20'
+              result.status === 'success' ? 'bg-success/10 border border-success/20' : result.status === 'duplicate' ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-destructive/10 border border-destructive/20'
             }`}>
               {result.status === 'success' ? (
                 <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
+              ) : result.status === 'duplicate' ? (
+                <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
               ) : (
                 <XCircle className="h-5 w-5 text-destructive shrink-0" />
               )}
               <div className="flex-1">
-                <p className={`font-medium ${result.status === 'success' ? 'text-success' : 'text-destructive'}`}>
+                <p className={`font-medium ${result.status === 'success' ? 'text-success' : result.status === 'duplicate' ? 'text-amber-600' : 'text-destructive'}`}>
                   {result.message}
                 </p>
                 {safeResultResponse && (

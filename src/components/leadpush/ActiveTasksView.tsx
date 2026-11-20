@@ -84,24 +84,27 @@ function ActiveTasksViewInner() {
     }
   }, [toast]);
 
-  const handlePause = useCallback(async (batchId: string) => {
-    await api.from('upload_batches').update({ is_paused: true, status: 'paused' }).eq('id', batchId);
-    toast({ title: 'Paused', description: 'Batch paused successfully' });
+  const updateTask = useCallback(async (batchId: string, changes: Record<string, unknown>, title: string) => {
+    const { error } = await api.from('upload_batches').update(changes).eq('id', batchId);
+    if (error) {
+      toast({ title: 'Could not update task', description: error.message, variant: 'destructive' });
+      return;
+    }
+    toast({ title });
     fetchTasks();
   }, [toast, fetchTasks]);
 
-  const handleResume = useCallback(async (batchId: string) => {
-    await api.from('upload_batches').update({ is_paused: false, status: 'processing' }).eq('id', batchId);
-    api.functions.invoke('process-queue', { body: { batchId } }).catch(() => {});
-    toast({ title: 'Resumed', description: 'Batch resumed' });
-    fetchTasks();
-  }, [toast, fetchTasks]);
+  const handlePause = useCallback((batchId: string) => {
+    updateTask(batchId, { is_paused: true, status: 'paused' }, 'Paused');
+  }, [updateTask]);
 
-  const handleStop = useCallback(async (batchId: string) => {
-    await api.from('upload_batches').update({ status: 'cancelled', is_cancelled: true, completed_at: new Date().toISOString() }).eq('id', batchId);
-    toast({ title: 'Stopped', description: 'Batch cancelled' });
-    fetchTasks();
-  }, [toast, fetchTasks]);
+  const handleResume = useCallback((batchId: string) => {
+    updateTask(batchId, { is_paused: false, status: 'processing' }, 'Resumed');
+  }, [updateTask]);
+
+  const handleStop = useCallback((batchId: string) => {
+    updateTask(batchId, { status: 'cancelled', is_cancelled: true, completed_at: new Date().toISOString() }, 'Stopped');
+  }, [updateTask]);
 
   const { activeTasks, scheduledTasks } = useMemo(() => ({
     activeTasks: tasks.filter(t => ['processing', 'pending', 'paused'].includes(t.status)),

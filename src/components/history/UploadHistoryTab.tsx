@@ -15,6 +15,7 @@ interface UploadBatch {
   status: string;
   created_at: string;
   completed_at: string | null;
+  error_message?: string;
   historical_import_without_source?: boolean;
 }
 
@@ -35,11 +36,7 @@ interface BatchLeadSummary {
   pending: number;
 }
 
-// Module-level cache
-let batchCache: { data: UploadBatch[]; filters: string; timestamp: number } | null = null;
-const CACHE_TTL = 30000;
-// Cache for batch reports to avoid re-fetching
-const reportCache = new Map<string, BatchLeadSummary>();
+const PAGE_SIZE = 100;
 
 export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
   const [batches, setBatches] = useState<UploadBatch[]>([]);
@@ -52,21 +49,15 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
   const [expandedBatch, setExpandedBatch] = useState<string | null>(null);
   const [batchReport, setBatchReport] = useState<BatchLeadSummary | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
-
-  const cacheKey = `${selectedUniversity}|${dateFrom}|${dateTo}|${statusFilter}`;
+  const [hasMore, setHasMore] = useState(false);
 
   const fetchBatches = useCallback(
-    async (forceRefresh = false) => {
-      if (!forceRefresh && batchCache && batchCache.filters === cacheKey && Date.now() - batchCache.timestamp < CACHE_TTL) {
-        setBatches(batchCache.data);
-        setLoading(false);
-        return;
-      }
+    async (offset = 0) => {
       setLoading(true);
       try {
         let query = api
           .from("upload_batches")
-          .select("id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, created_at, completed_at, historical_import_without_source")
+          .select("id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, created_at, completed_at, error_message, historical_import_without_source")
           .order("created_at", { ascending: false });
 
         if (selectedUniversity) query = query.eq("university_id", selectedUniversity);
@@ -74,22 +65,22 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
         if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
         if (statusFilter) query = query.eq("status", statusFilter);
 
-        const { data, error } = await query.limit(100);
+        const { data, error } = await query.range(offset, offset + PAGE_SIZE);
         if (error) throw error;
 
-        const result = data || [];
-        setBatches(result);
-        batchCache = { data: result, filters: cacheKey, timestamp: Date.now() };
+        const page = data || [];
+        setHasMore(page.length > PAGE_SIZE);
+        setBatches((current) => offset === 0 ? page.slice(0, PAGE_SIZE) : [...current, ...page.slice(0, PAGE_SIZE)]);
       } catch (error) {
         console.error("Error fetching batches:", error);
       } finally {
         setLoading(false);
       }
     },
-    [cacheKey],
+    [selectedUniversity, dateFrom, dateTo, statusFilter],
   );
 
-  useEffect(() => { fetchBatches(); }, [fetchBatches]);
+  useEffect(() => { fetchBatches(0); }, [fetchBatches]);
 
   // Build report directly from batch-level aggregate counts (no leads table query needed)
   const fetchBatchReport = useCallback(async (batchId: string) => {
@@ -125,11 +116,13 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
   const getUniversityName = (id: string) => uniNameMap.get(id) || "Unknown";
 
   const getStatusBadge = (batch: UploadBatch) => {
-    const processed = batch.success_count + batch.fail_count + (batch.duplicate_count || 0);
+    if (batch.status === "failed") {
+      return <span className="badge-destructive flex items-center gap-1"><XCircle className="h-3 w-3" /> Failed</span>;
+    }
     if (batch.status === "cancelled") {
       return <span className="badge-destructive flex items-center gap-1"><XCircle className="h-3 w-3" /> Cancelled</span>;
     }
-    if (batch.status === "completed" || processed >= batch.total_leads) {
+    if (batch.status === "completed") {
       if (batch.fail_count === 0 && (batch.duplicate_count || 0) === 0) {
         return <span className="badge-success flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Completed</span>;
       }
@@ -137,6 +130,9 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
     }
     if (batch.status === "processing") {
       return <span className="badge-info flex items-center gap-1"><Clock className="h-3 w-3" /> Processing</span>;
+    }
+    if (batch.status === "paused") {
+      return <span className="badge-info flex items-center gap-1"><Clock className="h-3 w-3" /> Paused</span>;
     }
     return <span className="badge-info flex items-center gap-1"><Clock className="h-3 w-3" /> Pending</span>;
   };
@@ -172,7 +168,7 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
           <h2 className="font-display text-2xl font-bold text-foreground">Upload History</h2>
           <p className="text-muted-foreground">View past uploads by university and date</p>
         </div>
-        <button onClick={() => { reportCache.clear(); fetchBatches(true); }} className="flex items-center gap-2 text-primary hover:underline">
+        <button onClick={() => fetchBatches(0)} className="flex items-center gap-2 text-primary hover:underline">
           <RefreshCw className="h-4 w-4" /> Refresh
         </button>
       </div>
@@ -208,8 +204,10 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
             <label className="block text-sm text-muted-foreground mb-1">Status</label>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="input-field">
               <option value="">All Status</option>
-            <option value="completed">Completed</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
               <option value="processing">Processing</option>
+              <option value="paused">Paused</option>
               <option value="pending">Pending</option>
               <option value="cancelled">Cancelled</option>
             </select>
@@ -292,6 +290,7 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
                         <div className="flex items-center gap-2">
                           <FileText className="h-4 w-4 text-muted-foreground" />
                           <span className="text-foreground">{batch.file_name || "Untitled"}</span>
+                          {batch.status === "failed" && batch.error_message && <p className="mt-1 text-xs text-destructive">{batch.error_message}</p>}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -358,6 +357,7 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
           </div>
         </div>
       )}
+      {hasMore && !loading && <button onClick={() => fetchBatches(batches.length)} className="mt-4 text-sm text-primary hover:underline">Load more history</button>}
     </div>
   );
 }

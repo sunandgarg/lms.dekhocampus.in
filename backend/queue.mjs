@@ -15,7 +15,8 @@ export async function enqueueLeads(db, batchId, tasks) {
     if (!Number.isInteger(item.index) || item.index < 0 || item.index >= Number(batch.total_leads) ||
         !item.leadData || typeof item.leadData !== 'object' || Array.isArray(item.leadData)) bad('Invalid lead index or data');
     const mapping = item.apiConfig && typeof item.apiConfig === 'object' ? item.apiConfig : {};
-    const task = { universityId: batch.university_id, batchId, sourceLabel: batch.source_label || '', leadData: item.leadData,
+    const task = { universityId: batch.university_id, batchId, leadIndex: item.index,
+      sourceLabel: batch.source_label || '', leadData: item.leadData,
       apiConfig: { columnMapping: mapping.columnMapping, customColumnMapping: mapping.customColumnMapping,
         apiTimeoutSeconds: mapping.apiTimeoutSeconds } };
     if (JSON.stringify(task).length > 100_000) bad('Lead data is too large');

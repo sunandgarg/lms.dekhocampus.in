@@ -267,21 +267,17 @@ export function UpgradConfigSection({
     };
 
     try {
-      const { data, error } = await api.functions.invoke("process-lead", {
+      const { data, error } = await api.functions.invoke("test-api", {
         body: {
-          universityId: "test-upgrad",
-          batchId: `test-${Date.now()}`,
           leadData,
-          apiConfig: {
-            apiUrl: apiUrl || "",
-            secretKey: secretKey || "",
-            collegeId: "",
-            source,
-            medium,
-            campaign,
-            apiType: "upgrad",
-            columnMapping,
-          },
+          apiUrl: apiUrl || "",
+          secretKey: secretKey || "",
+          collegeId: "",
+          source,
+          medium,
+          campaign,
+          apiType: "upgrad",
+          columnMapping,
         },
       });
       if (error) {

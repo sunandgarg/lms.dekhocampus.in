@@ -1,20 +1,21 @@
-import { Lead, StateCity, CourseSpecialization } from '@/types/university';
+import type { Lead, StateCity, CourseSpecialization } from '@/types/university';
 
 export function parseCSV(csvText: string, options?: { preserveHeaders?: boolean }): { headers: string[]; data: Record<string, string>[] } {
-  const lines = csvText.replace(/^\uFEFF/, '').trim().split(/\r?\n/).filter(line => line.trim());
-  if (lines.length < 2) {
+  const text = csvText.replace(/^\uFEFF/, '');
+  const delimiter = detectDelimiter(text.split(/\r?\n/, 1)[0]);
+  const rows = parseCSVRows(text, delimiter).filter((row) => row.some((value) => value.trim()));
+  if (rows.length < 2) {
     return { headers: [], data: [] };
   }
 
-  const delimiter = detectDelimiter(lines[0]);
-  const headers = parseCSVLine(lines[0], delimiter).map(h => {
+  const headers = rows[0].map(h => {
     const trimmed = h.trim();
     return options?.preserveHeaders ? trimmed : trimmed.toLowerCase().replace(/\s+/g, '_');
   });
   const data: Record<string, string>[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    let values = parseCSVLine(lines[i], delimiter).map(v => v.trim());
+  for (let i = 1; i < rows.length; i++) {
+    let values = rows[i].map(v => v.trim());
     if (values.length > headers.length && values.slice(headers.length).every(v => !v.trim())) {
       values = values.slice(0, headers.length);
     }
@@ -35,33 +36,48 @@ export function parseCSV(csvText: string, options?: { preserveHeaders?: boolean 
 function detectDelimiter(headerLine: string): ',' | '\t' | ';' {
   const candidates: Array<',' | '\t' | ';'> = [',', '\t', ';'];
   return candidates.reduce((best, current) =>
-    headerLine.split(current).length > headerLine.split(best).length ? current : best
+    countDelimiter(headerLine, current) > countDelimiter(headerLine, best) ? current : best
   );
 }
 
-function parseCSVLine(line: string, delimiter: string = ','): string[] {
-  const result: string[] = [];
-  let current = '';
+function countDelimiter(line: string, delimiter: string): number {
+  let count = 0;
   let inQuotes = false;
-
   for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    
-    if (char === '"' && line[i + 1] === '"' && inQuotes) {
-      current += '"';
-      i++;
-    } else if (char === '"') {
-      inQuotes = !inQuotes;
+    if (line[i] === '"') {
+      if (inQuotes && line[i + 1] === '"') i++;
+      else inQuotes = !inQuotes;
+    } else if (line[i] === delimiter && !inQuotes) count++;
+  }
+  return count;
+}
+
+function parseCSVRows(text: string, delimiter: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '"') {
+      if (inQuotes && text[i + 1] === '"') { cell += '"'; i++; }
+      else inQuotes = !inQuotes;
     } else if (char === delimiter && !inQuotes) {
-      result.push(current);
-      current = '';
+      row.push(cell);
+      cell = '';
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      if (char === '\r' && text[i + 1] === '\n') i++;
     } else {
-      current += char;
+      cell += char;
     }
   }
-  result.push(current);
-
-  return result;
+  if (inQuotes) throw new Error('CSV contains an unclosed quoted field');
+  if (cell || row.length) rows.push([...row, cell]);
+  return rows;
 }
 
 export function parseStateCityCSV(csvText: string): StateCity[] {

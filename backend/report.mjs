@@ -1,6 +1,7 @@
 function csv(value) {
   const string = String(value ?? '');
-  return `"${string.replaceAll('"', '""')}"`;
+  const safe = /^[=+\-@\t\r]/.test(string) ? `'${string}` : string;
+  return `"${safe.replaceAll('"', '""')}"`;
 }
 
 export async function* batchReport(db, batchId) {

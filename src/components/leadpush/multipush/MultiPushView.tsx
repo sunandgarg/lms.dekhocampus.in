@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { api } from '@/integrations/api/client';
 import { PresetManager } from './PresetManager';
 import { MultiPushReport } from './MultiPushReport';
+import { parseCSV } from '@/utils/csvParser';
 
 interface MultiPushViewProps {
   universities: any[];
@@ -39,12 +40,10 @@ export interface PushResult {
 }
 
 const REQUIRED_HEADERS = ['name', 'email', 'mobile'];
-const OPTIONAL_HEADERS = ['state', 'city', 'address'];
 
 function parseCsv(text: string): CsvLead[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) return [];
-  const rawHeaders = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
+  const parsed = parseCSV(text);
+  const rawHeaders = parsed.headers;
 
   // Normalize common aliases so multi-push only ever sees: name / email / mobile (+ optional)
   const aliasMap: Record<string, string> = {
@@ -56,15 +55,14 @@ function parseCsv(text: string): CsvLead[] {
   const headers = rawHeaders.map((h) => aliasMap[h] || h);
 
   const out: CsvLead[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i].split(',').map((c) => c.trim());
+  for (const source of parsed.data) {
     const row: any = {};
     headers.forEach((h, idx) => {
-      if (!row[h]) row[h] = cells[idx] || '';
+      if (!row[h]) row[h] = source[rawHeaders[idx]] || '';
     });
     // Preserve original raw header values too (e.g. lastname, phone.code) so process-lead can read them
-    rawHeaders.forEach((h, idx) => {
-      if (!(h in row)) row[h] = cells[idx] || '';
+    rawHeaders.forEach((h) => {
+      if (!(h in row)) row[h] = source[h] || '';
     });
     if (row.name || row.email || row.mobile) out.push(row);
   }
@@ -77,6 +75,7 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
 
   const [leads, setLeads] = useState<CsvLead[]>([]);
   const [fileName, setFileName] = useState('');
+  const [sourceCsv, setSourceCsv] = useState('');
   const [selectedUniIds, setSelectedUniIds] = useState<string[]>([]);
   const [presets, setPresets] = useState<any[]>([]);
   const [defaultsMap, setDefaultsMap] = useState<Record<string, Record<string, string>>>({});
@@ -86,13 +85,6 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
   const [inputMode, setInputMode] = useState<'csv' | 'quick'>('csv');
   const [quickLead, setQuickLead] = useState({ name: '', email: '', mobile: '' });
   const [throughput, setThroughput] = useState<{ done: number; elapsedMs: number }>({ done: 0, elapsedMs: 0 });
-  // Optional UI batching: only repaint results after every N completions (5/10/25/50).
-  // 0 = live (default - unchanged behaviour). Higher = fewer React re-renders on huge pushes.
-  const [uiBatchEnabled, setUiBatchEnabled] = useState<boolean>(() => localStorage.getItem('multipush_ui_batch_on') === '1');
-  const [uiBatchSize, setUiBatchSize] = useState<number>(() => {
-    const n = Number(localStorage.getItem('multipush_ui_batch_size'));
-    return [5, 10, 25, 50].includes(n) ? n : 25;
-  });
 
 
   // Fetch presets + defaults (from universities.default_values) on mount
@@ -124,7 +116,12 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
       const reader = new FileReader();
       reader.onload = (ev) => {
         const text = String(ev.target?.result || '');
-        const parsed = parseCsv(text);
+        let parsed: CsvLead[];
+        try { parsed = parseCsv(text); }
+        catch (error) {
+          toast({ title: 'Invalid CSV', description: String(error), variant: 'destructive' });
+          return;
+        }
         if (!parsed.length) {
           toast({ title: 'Empty CSV', description: 'No valid rows found', variant: 'destructive' });
           return;
@@ -140,6 +137,7 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
         }
         setLeads(parsed);
         setFileName(file.name);
+        setSourceCsv(text);
         setResults([]);
         setProgress(0);
         toast({ title: 'CSV loaded', description: `${parsed.length} leads ready` });
@@ -167,194 +165,154 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
 
   const handlePush = useCallback(async () => {
     if (!leads.length || !selectedUniversities.length) {
-      toast({ title: 'Nothing to push', description: 'Need leads + at least one university', variant: 'destructive' });
+      toast({ title: 'Nothing to push', description: 'Need leads and at least one university', variant: 'destructive' });
+      return;
+    }
+    if (!sourceCsv) {
+      toast({ title: 'Source file missing', description: 'Load the CSV or quick lead again', variant: 'destructive' });
       return;
     }
 
     setIsPushing(true);
     setProgress(0);
+    setResults([]);
     setThroughput({ done: 0, elapsedMs: 0 });
     const startedAt = performance.now();
-
-    // 1. Create one batch per university - in parallel (was sequential).
-    const { data: { user } } = await api.auth.getUser();
     const batchByUni: Record<string, string> = {};
-    const batchInserts = await Promise.all(
-      selectedUniversities.map((uni) =>
-        api
-          .from('upload_batches')
-          .insert({
-            file_name: `MultiPush: ${fileName}`,
-            total_leads: leads.length,
-            university_id: uni.id,
-            status: 'processing',
-            user_id: user?.id || null,
-          })
-          .select()
-          .single()
-          .then((r) => ({ uniId: uni.id, batchId: r.data?.id })),
-      ),
-    );
-    batchInserts.forEach(({ uniId, batchId }) => {
-      if (batchId) batchByUni[uniId] = batchId;
-    });
+    let sealed = 0;
+    try {
+      // Save every university batch and its source before allowing any delivery.
+      const created = await Promise.all(selectedUniversities.map(async (uni) => {
+        const { data, error } = await api.from('upload_batches').insert({
+          file_name: `MultiPush: ${fileName}`, university_id: uni.id,
+          total_leads: leads.length, status: 'uploading',
+          is_paused: false, is_cancelled: false,
+          source_label: uni.source || null,
+        }).select().single();
+        return { universityId: uni.id, batchId: data?.id as string | undefined, error };
+      }));
+      for (const item of created) if (item.batchId) batchByUni[item.universityId] = item.batchId;
+      if (created.some((item) => item.error || !item.batchId)) throw new Error('Could not create every university batch. No leads were sent.');
 
-    // 2. Build the full task matrix (lead × uni) and prepare server-side batch payloads.
-    //    BIG perf win: each HTTP call now carries up to CHUNK_SIZE tasks and is processed
-    //    server-side with internal concurrency, collapsing N roundtrips into N/CHUNK_SIZE.
-    type Task = { rowIndex: number; lead: CsvLead; uni: any; payload: any };
-    const tasks: Task[] = [];
-    for (let i = 0; i < leads.length; i++) {
-      for (const uni of selectedUniversities) {
-        const cm = uni.column_mapping || {};
-        const customColumnMapping: Record<string, string> = {};
-        (uni.customColumns || []).forEach((c: any) => {
-          customColumnMapping[c.columnKey] = c.columnKey;
+      for (const batchId of Object.values(batchByUni)) {
+        const archived = await fetch(`/api/batches/${batchId}/source`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/csv',
+            'X-Filename': `original-${fileName || 'multipush.csv'}`.replace(/[^\x20-\x7e]/g, '_') },
+          body: sourceCsv,
         });
-        const lead = leads[i];
-        tasks.push({
-          rowIndex: i,
-          lead,
-          uni,
-          payload: {
-            batchId: batchByUni[uni.id],
-            universityId: uni.id,
-            sourceLabel: uni.source || '',
-            leadData: {
-              name: lead.name || '',
-              email: lead.email || '',
-              mobile: lead.mobile || '',
-              address: lead.address || '',
-              state: lead.state || '',
-              city: lead.city || '',
-              leadSource: uni.source || '',
-              leadMedium: uni.medium || '',
-              leadCampaign: uni.campaign || '',
-              ...lead, // pass-through any extra CSV columns
-            },
-            apiConfig: {
-              apiUrl: uni.api_url,
-              secretKey: uni.secret_key,
-              collegeId: uni.college_id,
-              source: uni.source,
-              medium: uni.medium,
-              campaign: uni.campaign,
-              apiType: uni.api_type || 'generic',
-              columnMapping: cm,
-              customColumnMapping,
-              payloadWrapper: uni.payload_wrapper,
-              authType: uni.auth_type,
-              authHeaderKey: uni.auth_header_key,
-              authHeaderValue: uni.auth_header_value,
-              customHeaders: uni.custom_headers,
-              apiTimeoutSeconds: uni.api_timeout_seconds,
-              universityDefaults: defaultsMap[uni.id] || {},
-            },
-          },
-        });
+        if (!archived.ok) throw new Error('Could not archive every source CSV. No leads were sent.');
       }
-    }
 
-    const total = tasks.length;
-    const collected: PushResult[] = new Array(total);
-    let done = 0;
-
-    // Batched UI updates: avoid React re-render storms when many chunks finish at once.
-    // If uiBatchEnabled, only flush when `done` has advanced by uiBatchSize (or on final).
-    let pendingFlush = false;
-    let lastFlushedDone = 0;
-    const flushNow = () => {
-      setProgress(Math.round((done / total) * 100));
-      setResults(collected.filter(Boolean));
-      setThroughput({ done, elapsedMs: performance.now() - startedAt });
-      lastFlushedDone = done;
-    };
-    const scheduleFlush = () => {
-      if (uiBatchEnabled && uiBatchSize > 0) {
-        // Only flush when enough new results have accumulated, or job is complete.
-        if (done - lastFlushedDone < uiBatchSize && done < total) return;
-        if (pendingFlush) return;
-        pendingFlush = true;
-        requestAnimationFrame(() => {
-          pendingFlush = false;
-          flushNow();
+      // Queue every lead for every university before starting any batch.
+      for (const uni of selectedUniversities) {
+        const batchId = batchByUni[uni.id];
+        const customColumnMapping: Record<string, string> = {};
+        (uni.customColumns || []).forEach((column: any) => {
+          if (column.columnKey) customColumnMapping[column.columnKey] = column.apiFieldName || column.columnKey;
         });
+        const apiConfig = { columnMapping: uni.column_mapping || {}, customColumnMapping,
+          apiTimeoutSeconds: uni.api_timeout_seconds };
+        for (let start = 0; start < leads.length; start += 10) {
+          const tasks = leads.slice(start, start + 10).map((lead, offset) => ({
+            index: start + offset, apiConfig,
+            leadData: {
+              name: lead.name || '', email: lead.email || '', mobile: lead.mobile || '',
+              address: lead.address || '', state: lead.state || '', city: lead.city || '',
+              ...lead,
+              leadSource: lead.leadSource || uni.source || '',
+              leadMedium: lead.leadMedium || uni.medium || '',
+              leadCampaign: lead.leadCampaign || uni.campaign || '',
+            },
+          }));
+          const response = await fetch(`/api/batches/${batchId}/queue`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tasks }),
+          });
+          if (!response.ok) throw new Error('Could not save every lead to the server queue. No new batch was started.');
+        }
+      }
+
+      for (const batchId of Object.values(batchByUni)) {
+        const response = await fetch(`/api/batches/${batchId}/queue`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ finalize: true }),
+        });
+        if (!response.ok) throw new Error('Could not start every university batch. Check Upload History.');
+        sealed++;
+      }
+      toast({ title: 'Multi-Push queued', description: 'The server will continue processing if you close this page.' });
+
+      let batchStates: any[] = [];
+      let finished = false;
+      for (let attempt = 0; attempt < 300; attempt++) {
+        const { data, error } = await api.from('upload_batches')
+          .select('id, status, processed_count, error_message')
+          .in('id', Object.values(batchByUni)).limit(1000);
+        if (error) throw error;
+        batchStates = data || [];
+        const done = batchStates.reduce((sum, batch) => sum + Number(batch.processed_count || 0), 0);
+        setProgress(Math.round((done / totalPushes) * 100));
+        setThroughput({ done, elapsedMs: performance.now() - startedAt });
+        finished = batchStates.length === selectedUniversities.length &&
+          batchStates.every((batch) => ['completed', 'failed', 'cancelled'].includes(batch.status));
+        if (finished) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      if (!finished) {
+        toast({ title: 'Multi-Push is still processing', description: 'Check Upload History for the final report.' });
         return;
       }
-      if (pendingFlush) return;
-      pendingFlush = true;
-      requestAnimationFrame(() => {
-        pendingFlush = false;
-        flushNow();
-      });
-    };
 
-    // Strict sequential mode across the full leads × universities matrix.
-    // Each partner request finishes before the next one begins.
-    let taskCursor = 0;
-    const workerCount = Math.min(1, tasks.length);
-    const taskWorker = async () => {
-      while (true) {
-        const idx = taskCursor++;
-        if (idx >= tasks.length) return;
-        const task = tasks[idx];
-        try {
-          const { data, error } = await api.functions.invoke('process-lead', {
-            body: { tasks: [task.payload], concurrency: 1 },
-          });
+      const states = new Map<string, any>(batchStates.map((batch) => [batch.id, batch]));
+      const rowsByUni = new Map<string, Map<number, any>>();
+      for (const uni of selectedUniversities) {
+        const byIndex = new Map<number, any>();
+        let offset = 0;
+        while (true) {
+          const { data, error } = await api.from('leads')
+            .select('extra_data, status, api_response')
+            .eq('batch_id', batchByUni[uni.id]).range(offset, offset + 499);
           if (error) throw error;
-          const r = Array.isArray(data?.results) ? data.results[0] || {} : {};
-          const statusStr = String(r?.status || '').toLowerCase();
-          collected[idx] = {
-            rowIndex: task.rowIndex,
-            lead: task.lead,
-            universityId: task.uni.id,
-            universityName: task.uni.name,
-            status:
-              statusStr === 'success'
-                ? 'success'
-                : statusStr === 'duplicate'
-                ? 'duplicate'
-                : 'fail',
-            response: r?.response || '',
-          };
-        } catch (err: any) {
-          collected[idx] = {
-            rowIndex: task.rowIndex,
-            lead: task.lead,
-            universityId: task.uni.id,
-            universityName: task.uni.name,
-            status: 'fail',
-            response: String(err?.message || err),
-          };
+          const page = data || [];
+          for (const row of page) {
+            const index = Number(row.extra_data?.lead_index);
+            if (Number.isInteger(index)) byIndex.set(index, row);
+          }
+          if (page.length < 500) break;
+          offset += 500;
         }
-        done++;
-        scheduleFlush();
+        rowsByUni.set(uni.id, byIndex);
       }
-    };
-
-    await Promise.all(Array.from({ length: workerCount }, () => taskWorker()));
-
-
-    // Final flush (guaranteed, in case last RAF didn't fire).
-    setProgress(100);
-    setResults(collected.filter(Boolean));
-    setThroughput({ done, elapsedMs: performance.now() - startedAt });
-
-    // 3. Mark batches complete - in parallel.
-    await Promise.all(
-      Object.values(batchByUni).map((bid) =>
-        api.from('upload_batches').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', bid),
-      ),
-    );
-
-    setIsPushing(false);
-    const elapsedSec = ((performance.now() - startedAt) / 1000).toFixed(1);
-    toast({
-      title: 'Multi-Push complete',
-      description: `${collected.filter((r) => r.status === 'success').length}/${collected.length} succeeded in ${elapsedSec}s`,
-    });
-  }, [leads, selectedUniversities, defaultsMap, fileName, totalPushes, toast, uiBatchEnabled, uiBatchSize]);
+      const report: PushResult[] = [];
+      for (let rowIndex = 0; rowIndex < leads.length; rowIndex++) {
+        for (const uni of selectedUniversities) {
+          const row = rowsByUni.get(uni.id)?.get(rowIndex);
+          const status = String(row?.status || '').toLowerCase();
+          report.push({ rowIndex, lead: leads[rowIndex], universityId: uni.id,
+            universityName: uni.name,
+            status: status === 'success' ? 'success' : status === 'duplicate' ? 'duplicate' : row ? 'fail' : 'pending',
+            response: row?.api_response || states.get(batchByUni[uni.id])?.error_message ||
+              (row ? '' : 'No saved result; check the batch ZIP before retrying'),
+          });
+        }
+      }
+      setResults(report);
+      const done = report.filter((row) => row.status === 'success').length;
+      const needsReview = batchStates.some((batch) => batch.status === 'failed');
+      toast({ title: needsReview ? 'Multi-Push needs review' : 'Multi-Push complete',
+        description: `${done}/${report.length} succeeded. Batch ZIPs are available in Upload History.`,
+        variant: needsReview ? 'destructive' : 'default' });
+    } catch (error) {
+      await Promise.all(Object.values(batchByUni).map((batchId) =>
+        api.from('upload_batches').update({ status: 'failed', error_message: String(error) })
+          .eq('id', batchId).eq('status', 'uploading')));
+      toast({ title: sealed ? 'Multi-Push continues on the server' : 'Multi-Push could not start',
+        description: `${String(error)} Check Upload History before trying again.`, variant: 'destructive' });
+    } finally {
+      setIsPushing(false);
+    }
+  }, [leads, selectedUniversities, fileName, sourceCsv, totalPushes, toast]);
 
 
   return (
@@ -446,6 +404,7 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
                     }
                     setLeads([{ name: name.trim(), email: email.trim(), mobile: mobile.trim() }]);
                     setFileName(`QuickLead: ${name.trim()}`);
+                    setSourceCsv('name,email,mobile\n' + [name, email, mobile].map((value) => `"${value.trim().replace(/"/g, '""')}"`).join(',') + '\n');
                     setResults([]);
                     setProgress(0);
                     toast({ title: 'Quick lead ready', description: 'Now select universities & push' });
@@ -537,50 +496,10 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-end gap-4">
             <div className="space-y-1">
-              <Label className="text-xs flex items-center gap-1">
-                Partner API wave size
-              </Label>
+              <Label className="text-xs flex items-center gap-1">Server queue</Label>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="secondary">1 lead</Badge>
-                <span>Sequential: waits for each response before sending the next lead</span>
-              </div>
-            </div>
-
-            {/* Optional UI batching - reduces re-renders on huge pushes. Does NOT change push speed. */}
-            <div className="space-y-1">
-              <Label className="text-xs flex items-center gap-2">
-                <Checkbox
-                  id="ui-batch-toggle"
-                  checked={uiBatchEnabled}
-                  disabled={isPushing}
-                  onCheckedChange={(v) => {
-                    const on = !!v;
-                    setUiBatchEnabled(on);
-                    localStorage.setItem('multipush_ui_batch_on', on ? '1' : '0');
-                  }}
-                />
-                <label htmlFor="ui-batch-toggle" className="cursor-pointer select-none">
-                  Batch status updates
-                </label>
-                <span className="text-muted-foreground font-normal">(smoother UI on big pushes, same throughput)</span>
-              </Label>
-              <div className="flex gap-1">
-                {[5, 10, 25, 50].map((n) => (
-                  <Button
-                    key={n}
-                    type="button"
-                    size="sm"
-                    variant={uiBatchEnabled && uiBatchSize === n ? 'default' : 'outline'}
-                    disabled={isPushing || !uiBatchEnabled}
-                    onClick={() => {
-                      setUiBatchSize(n);
-                      localStorage.setItem('multipush_ui_batch_size', String(n));
-                    }}
-                    className="h-8 px-3 text-xs"
-                  >
-                    every {n}
-                  </Button>
-                ))}
+                <Badge variant="secondary">Up to 2 at once</Badge>
+                <span>Continues processing after this page closes</span>
               </div>
             </div>
             <Button onClick={handlePush} disabled={isPushing || !totalPushes} size="lg">

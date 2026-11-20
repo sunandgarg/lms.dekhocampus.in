@@ -220,7 +220,7 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
       }
       if (url.pathname === '/api/functions/test-api' && method === 'POST') {
         requireAdmin(user);
-        return send(response, 200, await testApi(await readJson(request)));
+        return send(response, 200, await testApi(await readJson(request), { s3, bucket }));
       }
       if (url.pathname === '/api/functions/test-custom-integration' && method === 'POST') {
         requireAdmin(user);

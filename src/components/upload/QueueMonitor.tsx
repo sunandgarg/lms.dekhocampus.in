@@ -1,5 +1,5 @@
 import { useState, useEffect, memo, useMemo, useCallback } from "react";
-import { Activity, CheckCircle2, XCircle, Loader2, RefreshCw, User, Pause, Play, Trash2 } from "lucide-react";
+import { Activity, CheckCircle2, XCircle, Loader2, RefreshCw, User, Pause, Play } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ interface BatchInfo {
   is_cancelled: boolean;
   created_at: string;
   user_id: string;
+  error_message?: string;
   user_email?: string;
   university_name?: string;
 }
@@ -46,9 +47,6 @@ const stringifyBatchValue = (value: unknown): string => {
 
 type TabKey = "active" | "failed" | "success";
 
-const REFRESH_COOLDOWN_MS = 2 * 60 * 1000;
-const REFRESH_OVERRIDE_PIN = "123456";
-
 function QueueMonitorInner() {
   const { isAdmin, loading: adminAuthLoading } = useAdminAuth();
   const { user } = useAuth();
@@ -57,11 +55,8 @@ function QueueMonitorInner() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>("active");
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const [refreshCooldownUntil, setRefreshCooldownUntil] = useState(0);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-
   const fetchBatches = useCallback(
-    async (silent = false, startCooldown = false) => {
+    async (silent = false) => {
       if (!silent) setLoading(true);
       try {
         if (!isAdmin && !user?.id) {
@@ -72,7 +67,7 @@ function QueueMonitorInner() {
         let query = api
           .from("upload_batches")
           .select(
-            "id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, user_id",
+            "id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, user_id, error_message",
           )
           .order("created_at", { ascending: false })
           .limit(50);
@@ -111,11 +106,6 @@ function QueueMonitorInner() {
             user_email: userMap.get(b.user_id) || undefined,
           })),
         );
-        if (startCooldown) {
-          const nextNow = Date.now();
-          setNowMs(nextNow);
-          setRefreshCooldownUntil(nextNow + REFRESH_COOLDOWN_MS);
-        }
       } catch (e) {
         console.error("Failed to fetch batches:", e);
       } finally {
@@ -127,34 +117,16 @@ function QueueMonitorInner() {
 
   useEffect(() => {
     if (adminAuthLoading) return;
-    fetchBatches(false, true);
+    fetchBatches();
   }, [adminAuthLoading, fetchBatches]);
 
   // Queue data is intentionally manual-refresh only. Automatic polling here
   // caused network/state updates while a CSV push was running and made users
   // think the whole upload page had reloaded. The refresh button below updates
   // this card only.
-  useEffect(() => {
-    if (refreshCooldownUntil <= Date.now()) return;
-    const intervalId = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(intervalId);
-  }, [refreshCooldownUntil]);
-
-  const refreshRemainingSeconds = Math.max(0, Math.ceil((refreshCooldownUntil - nowMs) / 1000));
-
   const handleManualRefresh = useCallback(() => {
-    if (refreshRemainingSeconds > 0) {
-      const pin = window.prompt(`Refresh is available in ${refreshRemainingSeconds}s. Enter PIN to override.`);
-      if (pin !== REFRESH_OVERRIDE_PIN) {
-        if (pin !== null) {
-          toast({ title: "Invalid PIN", description: "Refresh was not run.", variant: "destructive" });
-        }
-        return;
-      }
-    }
-
-    fetchBatches(false, true);
-  }, [fetchBatches, refreshRemainingSeconds, toast]);
+    fetchBatches();
+  }, [fetchBatches]);
 
   const { activeBatches, failedBatches, successBatches } = useMemo(() => {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -165,14 +137,14 @@ function QueueMonitorInner() {
           b.created_at > twentyFourHoursAgo &&
           !b.is_cancelled,
       ),
-      failedBatches: batches.filter((b) => (b.status === "completed" && (b.fail_count + (b.duplicate_count || 0) > 0)) || b.status === "cancelled"),
+      failedBatches: batches.filter((b) => (b.status === "completed" && (b.fail_count + (b.duplicate_count || 0) > 0)) || b.status === "failed" || b.status === "cancelled"),
       successBatches: batches.filter((b) => b.status === "completed" && (b.fail_count + (b.duplicate_count || 0) === 0) && b.success_count > 0),
     };
   }, [batches]);
 
   const tabs: { key: TabKey; label: string; count: number; icon: typeof Activity }[] = [
     { key: "active", label: "Active", count: activeBatches.length, icon: Loader2 },
-    { key: "failed", label: "Failed", count: failedBatches.length, icon: XCircle },
+    { key: "failed", label: "Failed/Duplicate", count: failedBatches.length, icon: XCircle },
     { key: "success", label: "Success", count: successBatches.length, icon: CheckCircle2 },
   ];
 
@@ -227,38 +199,6 @@ function QueueMonitorInner() {
     [updateBatch],
   );
 
-  const handleDelete = useCallback(
-    async (batch: BatchInfo) => {
-      if (!window.confirm(`Delete task "${stringifyBatchValue(batch.file_name) || "Untitled"}"? This removes it from the queue monitor.`)) {
-        return;
-      }
-
-      setProcessingId(batch.id);
-      try {
-        if (!batch.is_cancelled && batch.status !== "completed" && batch.status !== "cancelled") {
-          await api
-            .from("upload_batches")
-            .update({ status: "cancelled", is_cancelled: true, is_paused: false, completed_at: new Date().toISOString() })
-            .eq("id", batch.id);
-        }
-
-        const { error } = await api.from("upload_batches").delete().eq("id", batch.id);
-        if (error) throw error;
-        toast({ title: "Task deleted" });
-        fetchBatches(true);
-      } catch (error: any) {
-        toast({
-          title: "Error",
-          description: error?.message || "Failed to delete task",
-          variant: "destructive",
-        });
-      } finally {
-        setProcessingId(null);
-      }
-    },
-    [fetchBatches, toast],
-  );
-
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -274,7 +214,6 @@ function QueueMonitorInner() {
           </CardTitle>
           <Button variant="ghost" size="sm" className="h-7 gap-1 px-2" onClick={handleManualRefresh}>
             <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-            {refreshRemainingSeconds > 0 && <span className="text-[11px] tabular-nums">{refreshRemainingSeconds}s</span>}
           </Button>
         </div>
       </CardHeader>
@@ -344,7 +283,10 @@ function QueueMonitorInner() {
                   className={cn("p-3 border rounded-lg", isActive && "border-blue-200 dark:border-blue-900")}
                 >
                   <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <span className="text-sm font-medium truncate">{stringifyBatchValue(batch.file_name)}</span>
+                    <div className="min-w-0">
+                      <span className="text-sm font-medium truncate">{stringifyBatchValue(batch.file_name)}</span>
+                      {batch.status === "failed" && batch.error_message && <p className="text-xs text-destructive">{batch.error_message}</p>}
+                    </div>
                     {batch.is_paused ? (
                       <Badge variant="outline" className="text-[10px] px-1.5">
                         Paused
@@ -353,6 +295,12 @@ function QueueMonitorInner() {
                       <Badge className="text-[10px] px-1.5 bg-blue-500/15 text-blue-600 border-blue-200">
                         Processing
                       </Badge>
+                    ) : batch.status === "failed" ? (
+                      <Badge variant="destructive" className="text-[10px] px-1.5">Failed</Badge>
+                    ) : batch.status === "cancelled" ? (
+                      <Badge variant="destructive" className="text-[10px] px-1.5">Cancelled</Badge>
+                    ) : batch.status === "completed" && batch.fail_count === 0 && (batch.duplicate_count || 0) > 0 && batch.success_count === 0 ? (
+                      <Badge className="text-[10px] px-1.5 bg-amber-500/15 text-amber-600 border-amber-200">Duplicate</Badge>
                     ) : batch.status === "completed" && batch.fail_count + (batch.duplicate_count || 0) > 0 && batch.success_count > 0 ? (
                       <Badge className="text-[10px] px-1.5 bg-amber-500/15 text-amber-600 border-amber-200">
                         Partial
@@ -438,17 +386,6 @@ function QueueMonitorInner() {
                         Stop
                       </Button>
                     )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                      disabled={isWorking}
-                      onClick={() => handleDelete(batch)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      Delete
-                    </Button>
                   </div>
                 </div>
               );

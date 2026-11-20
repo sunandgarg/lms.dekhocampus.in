@@ -38,7 +38,11 @@ export const MultiPushReport = memo(function MultiPushReport({ results, universi
         (r.response || '').replace(/[\n\r,]/g, ' ').slice(0, 300),
       ]),
     ];
-    const csv = rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = rows.map((row) => row.map((c) => {
+      const value = String(c);
+      const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+      return `"${safe.replace(/"/g, '""')}"`;
+    }).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

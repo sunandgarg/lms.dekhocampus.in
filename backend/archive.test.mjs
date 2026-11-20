@@ -24,6 +24,19 @@ test('lead input is saved before delivery without partner credentials', async ()
   assert.match(writes[1].Body, /Success/);
 });
 
+test('short custom header secrets are also removed from downloadable requests', async () => {
+  const writes = [];
+  await archiveAndDeliver({
+    s3: { send: async (command) => { writes.push(command.input); return {}; } },
+    bucket: 'archive', batchId,
+    input: { apiConfig: { customHeaders: { 'X-Partner': 'abc' } },
+      outbound: { headers: { 'X-Partner': 'abc' }, body: { partnerCode: 'abc' } } },
+    deliver: async () => ({ status: 'Success', response: 'Partner echoed abc in its reply' }),
+  });
+  assert.doesNotMatch(writes[0].Body, /abc/);
+  assert.doesNotMatch(writes[1].Body, /abc/);
+});
+
 test('delivery does not start when request archive fails', async () => {
   let delivered = false;
   await assert.rejects(archiveAndDeliver({

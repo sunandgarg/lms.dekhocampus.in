@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
-import { archiveAndDeliver } from './archive.mjs';
+import { archiveAndDeliver, redactPartnerResponse } from './archive.mjs';
 import { buildPayload, categorizeResponse } from './lead-payload.mjs';
 import { executeRecords } from './records.mjs';
 import { syncLeadToCrm } from './crm-sync.mjs';
@@ -126,6 +126,7 @@ function leadRow(task, result, userId) {
   const standard = new Set(['name', 'email', 'mobile', 'address', 'city', 'state', 'course', 'specialization', 'leadSource', 'leadMedium', 'leadCampaign']);
   const extra = Object.fromEntries(Object.entries(lead).filter(([key]) => !standard.has(key)));
   if (task.retryOf) extra.retry_of = task.retryOf;
+  if (Number.isInteger(task.leadIndex)) extra.lead_index = task.leadIndex;
   return {
     batch_id: task.batchId,
     university_id: task.universityId,
@@ -167,7 +168,8 @@ async function deliverPartner(task, config, db, outbound) {
     const status = categorizeResponse(response.status, responseBody, response.ok);
     return { success: status === 'Success', status, response: responseBody, httpStatus: response.status };
   } catch (error) {
-    return { success: false, status: 'Fail', response: String(error), httpStatus: 0 };
+    // A timeout or dropped connection does not prove the partner rejected the lead.
+    return { success: false, status: 'Needs_Review', response: String(error), httpStatus: 0 };
   }
 }
 
@@ -211,6 +213,7 @@ export async function processLead({ db, s3, bucket, task, userId }) {
       ? { ...error.deliveryResult, response: `${error.deliveryResult.response || ''}\nResponse archive failed` }
       : { success: false, status: archiveError ? 'Archive_Error' : 'Fail', response: String(error), httpStatus: 0 };
   }
+  result.response = redactPartnerResponse(String(result.response || ''), config);
   await db.execute(
     'INSERT INTO lms_transactions (id, batch_id, university_id, user_id, request_key, response_key, status, http_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [transactionId, task.batchId, task.universityId, userId, `${prefix}request.json`, archiveError ? null : `${prefix}response.json`, result.status, result.httpStatus],

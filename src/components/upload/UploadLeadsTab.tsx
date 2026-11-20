@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Pause,
   Play,
-  RotateCcw,
   Clock,
   Plus,
   AlertTriangle,
@@ -83,14 +82,6 @@ function normalizePartnerResponse(value: unknown): string {
     const flattened = stringifyUiValue(value);
     return flattened || "No response";
   }
-}
-
-function normalizePartnerStatus(value: unknown): "Success" | "Duplicate" | "Fail" | "Cancelled" {
-  const status = stringifyUiValue(value).toLowerCase();
-  if (status === "success") return "Success";
-  if (status === "duplicate") return "Duplicate";
-  if (status === "cancelled") return "Cancelled";
-  return "Fail";
 }
 
 // This is the final UI boundary for asynchronous partner results. Do not rely
@@ -598,7 +589,6 @@ export function UploadLeadsTab({
   const processingRef = useRef<boolean>(false);
   const pausedRef = useRef<boolean>(false);
   const activeRunIdRef = useRef(0);
-  const activePacketControllersRef = useRef<Set<AbortController>>(new Set());
   const currentIndexRef = useRef<number>(persistedProcessing.currentIndex);
   const applyColumnMappingAndProcessRef = useRef<((mapping?: Record<string, string>) => void) | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -727,15 +717,16 @@ export function UploadLeadsTab({
         setIsPaused(false);
 
         const success = batch.success_count ?? 0;
-        const failed = (batch.fail_count ?? 0) + (batch.duplicate_count ?? 0);
+        const failed = batch.fail_count ?? 0;
+        const duplicates = batch.duplicate_count ?? 0;
         setAlert({
-          type: batch.status === "failed" ? "error" : batch.status === "cancelled" ? "info" : failed === 0 ? "success" : "info",
+          type: batch.status === "failed" ? "error" : batch.status === "cancelled" ? "info" : failed === 0 && duplicates === 0 ? "success" : "info",
           message:
             batch.status === "failed"
               ? "Processing stopped. Review the batch history and transaction archive before retrying."
               : batch.status === "cancelled"
               ? "Processing was cancelled."
-              : `Processing complete! Success: ${success}, Failed: ${failed}`,
+              : `Processing complete! Success: ${success}, Duplicate: ${duplicates}, Failed: ${failed}`,
         });
       }
     } catch (error) {
@@ -1857,8 +1848,7 @@ export function UploadLeadsTab({
     return data.id;
   };
 
-  // Frontend-driven processing. Lead payloads are not stored in public.leads;
-  // only the batch history, counters, and aggregate statistics are persisted.
+  // Save the source and queue first; the server continues delivery if this tab closes.
   const startBackgroundProcessing = async () => {
     if (!selectedUniversity?.detailsLoaded || leads.length === 0) return;
 
@@ -1925,17 +1915,18 @@ export function UploadLeadsTab({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ finalize: true }),
       });
-      if (!final.ok) throw new Error('Could not start the server queue. No leads were sent.');
+      if (!final.ok) throw new Error('Could not confirm the server queue. Check Upload History before retrying.');
       setIsBackgroundPolling(true);
       setAlert({ type: 'info', message: `Queued ${leads.length} leads. Processing will continue if you close this page.` });
     } catch (error) {
       console.error("Processing error:", error);
       if (newBatchId) {
-        await api.from('upload_batches').update({ status: 'failed', error_message: String(error) }).eq('id', newBatchId);
+        await api.from('upload_batches').update({ status: 'failed', error_message: String(error) })
+          .eq('id', newBatchId).eq('status', 'uploading');
       }
       setAlert({
         type: "error",
-        message: error instanceof Error ? error.message : `Processing failed: ${String(error)}`,
+        message: `${error instanceof Error ? error.message : String(error)} Check Upload History before trying again.`,
       });
       processingRef.current = false;
       setIsProcessing(false);
@@ -2013,110 +2004,6 @@ export function UploadLeadsTab({
     };
   }, [selectedUniversity, tempColumnMapping]);
 
-  // Direct edge function call - no leads table insert
-  const processLead = async (
-    lead: Lead,
-    _index: number,
-    batchIdParam: string,
-    precomputedApiConfig?: ReturnType<typeof getApiConfig>,
-  ): Promise<{ success: boolean; status: string; response: string }> => {
-    if (!selectedUniversity) return { success: false, status: "Fail", response: "No university selected" };
-
-    try {
-      const apiConfig = precomputedApiConfig || getApiConfig();
-
-      const { data, error } = await api.functions.invoke("process-lead", {
-        body: {
-          universityId: selectedUniversity.id,
-          batchId: batchIdParam,
-          sourceLabel: sourceLabel.trim() || null,
-          leadData: {
-            ...lead,
-            leadSource: lead.leadSource || selectedUniversity.source,
-            leadMedium: lead.leadMedium || selectedUniversity.medium,
-            leadCampaign: lead.leadCampaign || selectedUniversity.campaign,
-          },
-          apiConfig,
-        },
-      });
-
-      if (error) {
-        console.error("Edge function error:", error);
-        return { success: false, status: "Fail", response: error.message };
-      }
-
-      return {
-        success: normalizePartnerStatus(data?.status) === "Success",
-        status: normalizePartnerStatus(data?.status),
-        response: normalizePartnerResponse(data?.response),
-      };
-    } catch (error) {
-      console.error("Process lead error:", error);
-      return { success: false, status: "Fail", response: String(error) };
-    }
-  };
-
-  // Amortize Edge Function startup and database guard/counter work across a
-  // small packet. The Edge Function still POSTs each lead separately to the
-  // partner; concurrency controls only how many of those POSTs overlap.
-  const processLeadPacket = async (
-    packet: Array<{ lead: Lead; index: number }>,
-    batchIdParam: string,
-    apiConfig: ReturnType<typeof getApiConfig>,
-    signal?: AbortSignal,
-  ): Promise<Array<{ success: boolean; status: string; response: string }>> => {
-    if (!selectedUniversity || !apiConfig) {
-      return packet.map(() => ({ success: false, status: "Fail", response: "No university selected" }));
-    }
-
-    const tasks = packet.map(({ lead }) => ({
-      universityId: selectedUniversity.id,
-      batchId: batchIdParam,
-      sourceLabel: sourceLabel.trim() || null,
-      leadData: {
-        ...lead,
-        leadSource: lead.leadSource || selectedUniversity.source,
-        leadMedium: lead.leadMedium || selectedUniversity.medium,
-        leadCampaign: lead.leadCampaign || selectedUniversity.campaign,
-      },
-      apiConfig,
-    }));
-
-    try {
-      const { data, error } = await api.functions.invoke("process-lead", {
-        body: { tasks, concurrency: 1 },
-        signal,
-      });
-      if (error) throw error;
-      const results = Array.isArray(data?.results) ? data.results : [];
-      return packet.map((_, index) => {
-        const result = results[index] || {};
-        return {
-          success: normalizePartnerStatus(result.status) === "Success",
-          status: normalizePartnerStatus(result.status),
-          response: normalizePartnerResponse(result.response),
-        };
-      });
-    } catch (error) {
-      if (signal?.aborted) {
-        return packet.map(() => ({ success: false, status: "Cancelled", response: "Processing stopped" }));
-      }
-      throw error;
-    }
-  };
-
-  const checkBatchStatus = async (batchIdToCheck: string): Promise<{ isPaused: boolean; isCancelled: boolean }> => {
-    const { data } = await api
-      .from("upload_batches")
-      .select("is_paused, is_cancelled")
-      .eq("id", batchIdToCheck)
-      .maybeSingle();
-    return {
-      isPaused: data?.is_paused ?? false,
-      isCancelled: data?.is_cancelled ?? false,
-    };
-  };
-
   const processLeads = useCallback(async () => {
     if (!selectedUniversity?.detailsLoaded || leads.length === 0) {
       if (selectedUniversity && !selectedUniversity.detailsLoaded) {
@@ -2146,29 +2033,30 @@ export function UploadLeadsTab({
   }, [selectedUniversity, leads, startBackgroundProcessing, sourceLabel]);
 
   const pauseProcessing = async () => {
+    if (!batchId) return;
+    const { error } = await api.from("upload_batches").update({ is_paused: true, status: "paused" }).eq("id", batchId);
+    if (error) { setAlert({ type: "error", message: `Could not pause processing: ${error.message}` }); return; }
     pausedRef.current = true;
     setIsPaused(true);
     setAlert({ type: "info", message: "Processing paused. Click resume to continue." });
-    if (batchId) {
-      api.from("upload_batches").update({ is_paused: true, status: "paused" }).eq("id", batchId).then();
-    }
   };
 
   const resumeProcessing = async () => {
+    if (!batchId) return;
+    const { error } = await api.from("upload_batches").update({ is_paused: false, status: "processing" }).eq("id", batchId);
+    if (error) { setAlert({ type: "error", message: `Could not resume processing: ${error.message}` }); return; }
     pausedRef.current = false;
     setIsPaused(false);
     setAlert(null);
-    if (batchId) {
-      await api.from("upload_batches").update({ is_paused: false, status: "processing" }).eq("id", batchId);
-    }
   };
 
   const stopProcessing = async () => {
+    if (!batchId) return;
+    const { error } = await api.from("upload_batches").update({ status: "cancelled", is_cancelled: true }).eq("id", batchId);
+    if (error) { setAlert({ type: "error", message: `Could not stop processing: ${error.message}` }); return; }
     processingRef.current = false;
     pausedRef.current = false;
     activeRunIdRef.current++;
-    activePacketControllersRef.current.forEach((controller) => controller.abort());
-    activePacketControllersRef.current.clear();
     setIsProcessing(false);
     setIsPaused(false);
     setIsBackgroundPolling(false);
@@ -2176,76 +2064,13 @@ export function UploadLeadsTab({
       clearInterval(pollingRef.current);
       pollingRef.current = null;
     }
-    setAlert({ type: "info", message: "Processing stopped. Remaining leads cancelled." });
-    if (batchId) {
-      api.from("upload_batches").update({ status: "cancelled", is_cancelled: true }).eq("id", batchId).then();
-    }
-  };
-
-  const retryLead = async (index: number) => {
-    if (!selectedUniversity || !batchId) return;
-
-    const statuses = new Map(leadStatuses);
-    const responses = new Map(leadResponses);
-    statuses.set(index, "pending");
-    setLeadStatuses(new Map(statuses));
-
-    const lead = leads[index];
-    const result = await processLead(lead, index, batchId);
-
-    const retryStatus =
-      result.status === "Success" ? "success" : result.status === "Duplicate" ? "duplicate" : "failed";
-    statuses.set(index, retryStatus);
-    responses.set(index, result.response);
-    setLeadStatuses(new Map(statuses));
-    setLeadResponses(new Map(responses));
-  };
-
-  const bulkRetryFailed = async () => {
-    if (!selectedUniversity || !batchId) return;
-
-    setIsProcessing(true);
-    const statuses = new Map(leadStatuses);
-    const responses = new Map(leadResponses);
-    const failedIndices = [...statuses.entries()].filter(([_, s]) => s === "failed").map(([i]) => i);
-    const precomputedApiConfig = getApiConfig();
-    failedIndices.forEach((index) => statuses.set(index, "pending"));
-    setLeadStatuses(new Map(statuses));
-
-    let retryCursor = 0;
-    let retryCompleted = 0;
-    const retryWorker = async () => {
-      while (true) {
-        const index = failedIndices[retryCursor++];
-        if (index === undefined) return;
-        const result = await processLead(leads[index], index, batchId, precomputedApiConfig);
-        const bulkRetryStatus =
-          result.status === "Success" ? "success" : result.status === "Duplicate" ? "duplicate" : "failed";
-        statuses.set(index, bulkRetryStatus);
-        responses.set(index, result.response);
-        retryCompleted++;
-        setLeadStatuses(new Map(statuses));
-        setLeadResponses(new Map(responses));
-      }
-    };
-
-    await Promise.all(Array.from({ length: Math.min(pushConcurrency, failedIndices.length) }, () => retryWorker()));
-
-    setIsProcessing(false);
-    const successCount = [...statuses.values()].filter((s) => s === "success").length;
-    const stillFailed = [...statuses.values()].filter((s) => s === "failed").length;
-    setAlert({
-      type: stillFailed === 0 ? "success" : "info",
-      message: `Retry complete! ${successCount} total succeeded, ${stillFailed} still failed.`,
-    });
+    setAlert({ type: "info", message: "Processing stopped. No new leads will start; deliveries already in flight may finish." });
   };
 
   const clearAll = () => {
     processingRef.current = false;
     pausedRef.current = false;
     activeRunIdRef.current++;
-    activePacketControllersRef.current.forEach((controller) => controller.abort());
-    activePacketControllersRef.current.clear();
     setIsBackgroundPolling(false);
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
@@ -2764,7 +2589,6 @@ export function UploadLeadsTab({
                 leadPayloads={leadPayloads}
                 validationErrors={validationErrors}
                 dbDuplicates={dbDuplicates}
-                onRetry={!isProcessing ? retryLead : undefined}
                 onUpdateLead={!isProcessing ? handleUpdateLead : undefined}
                 isEditable={!isProcessing && processedDisplayCount === 0}
                 rowOffset={0}
@@ -2943,15 +2767,6 @@ export function UploadLeadsTab({
                   </div>
                 )}
 
-                {failedCount > 0 && !isProcessing && (
-                  <button
-                    onClick={bulkRetryFailed}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium border border-warning text-warning hover:bg-warning/10"
-                  >
-                    <RotateCcw className="h-5 w-5" />
-                    Retry All Failed ({failedCount})
-                  </button>
-                )}
               </div>
             </div>
           )}

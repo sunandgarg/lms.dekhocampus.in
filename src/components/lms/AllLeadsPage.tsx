@@ -88,6 +88,7 @@ function mapStatus(s: string | null): string {
   if (s === "Success") return "Pushed";
   if (s === "Fail" || s === "failed") return "Failed";
   if (s === "Duplicate" || s === "duplicate") return "Duplicate";
+  if (s === "Needs_Review") return "Needs review";
   if (s === "pending") return "Pending";
   return s;
 }

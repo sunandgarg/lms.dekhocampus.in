@@ -15,22 +15,31 @@ function batchPrefix(batchId) {
 function archiveInput(input) {
   const { apiConfig = {}, ...lead } = input;
   const secrets = new Set([apiConfig.secretKey, apiConfig.authHeaderValue,
-    ...Object.values(apiConfig.customHeaders || {})].filter((value) => typeof value === 'string' && value.length > 3));
+    ...Object.values(apiConfig.customHeaders || {})].filter((value) => typeof value === 'string' && value.length > 0));
+  const mask = (value) => {
+    let clean = value;
+    for (const secret of secrets) clean = clean.replaceAll(secret, '[redacted]');
+    return clean;
+  };
   const redact = (value, field = '') => {
     if (/secret|token|password|authorization|api.?key/i.test(field)) return '[redacted]';
     if (field === 'url' && typeof value === 'string') {
       try {
         const url = new URL(value);
         for (const key of url.searchParams.keys()) url.searchParams.set(key, '[redacted]');
-        return url.href;
+        return mask(url.href);
       } catch { return '[invalid URL]'; }
     }
-    if (typeof value === 'string' && secrets.has(value)) return '[redacted]';
+    if (typeof value === 'string') return mask(value);
     if (Array.isArray(value)) return value.map((item) => redact(item));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redact(item, key)]));
     return value;
   };
   return redact(lead);
+}
+
+export function redactPartnerResponse(value, apiConfig) {
+  return archiveInput({ result: value, apiConfig }).result;
 }
 
 export async function archiveAndDeliver({ s3, bucket, batchId, input, deliver, transactionId = randomUUID() }) {
@@ -59,7 +68,7 @@ export async function archiveAndDeliver({ s3, bucket, batchId, input, deliver, t
     try { await s3.send(new PutObjectCommand({
       Bucket: bucket,
       Key: `${prefix}response.json`,
-      Body: JSON.stringify({ recordedAt: new Date().toISOString(), result }),
+      Body: JSON.stringify({ recordedAt: new Date().toISOString(), result: redactPartnerResponse(result, input.apiConfig) }),
       ContentType: 'application/json',
       ServerSideEncryption: 'AES256',
     })); } catch (error) {

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { archiveAndDeliver } from './archive.mjs';
 import { buildPayload, categorizeResponse } from './lead-payload.mjs';
 import { validPartnerUrl } from './lead-processor.mjs';
 
@@ -22,9 +24,16 @@ async function sendTest(url, method, headers, body, seconds = 30) {
   return { status: response.status, ok: response.ok, text, parsed };
 }
 
-export async function testApi(input) {
-  const lead = { name: 'Test Lead', email: `test_${Date.now()}@test.invalid`, mobile: '9999999999',
+export async function testApi(input, { s3, bucket } = {}) {
+  if (!s3 || !bucket) throw new Error('Test transaction archive is not configured');
+  const sample = { name: 'Test Lead', email: `test_${Date.now()}@test.invalid`, mobile: '9999999999',
     state: 'Test State', city: 'Test City', course: 'Test Course', specialization: 'Test Specialization' };
+  const provided = input.leadData;
+  if (provided && (typeof provided !== 'object' || Array.isArray(provided) ||
+      JSON.stringify(provided).length > 100_000 || Object.values(provided).some((value) => typeof value !== 'string'))) {
+    throw Object.assign(new Error('Invalid test lead data'), { status: 400 });
+  }
+  const lead = provided || sample;
   const config = { apiUrl: input.apiUrl, secretKey: input.secretKey || '', collegeId: input.collegeId || '',
     source: input.source || '', medium: input.medium || '', campaign: input.campaign || '',
     apiType: input.apiType || 'generic', columnMapping: input.columnMapping || {},
@@ -32,14 +41,18 @@ export async function testApi(input) {
     authHeaderKey: input.authHeaderKey, authHeaderValue: input.authHeaderValue };
   const { payload, headers } = buildPayload(lead, config);
   const body = input.payloadWrapper === 'array' ? [payload] : payload;
-  const response = await sendTest(input.apiUrl, 'POST', headers, body, input.apiTimeoutSeconds);
+  const archiveId = randomUUID();
+  const response = await archiveAndDeliver({ s3, bucket, batchId: archiveId,
+    input: { leadData: lead, outbound: { url: input.apiUrl, method: 'POST', headers, body }, apiConfig: config },
+    deliver: () => sendTest(input.apiUrl, 'POST', headers, body, input.apiTimeoutSeconds),
+  });
   const status = categorizeResponse(response.status, response.text, response.ok);
   const message = String(response.parsed?.message || response.parsed?.Message || '').slice(0, 500);
   const credentialsRejected = /college id|secret|authentication|unauthorized|invalid key|forbidden/i.test(message);
   const dataRejected = /already exist|duplicate|invalid email|invalid mobile|required field/i.test(message);
   const isConfigValid = !credentialsRejected && (status === 'Success' || status === 'Duplicate' || dataRejected);
-  return { isConfigValid, errorMessage: isConfigValid ? (dataRejected ? `Config valid; ${message}` : '') : message || `Partner returned HTTP ${response.status}`,
-    httpStatus: response.status, response: response.text };
+  return { isConfigValid, status, errorMessage: isConfigValid ? (dataRejected ? `Config valid; ${message}` : '') : message || `Partner returned HTTP ${response.status}`,
+    httpStatus: response.status, response: response.text, archiveId };
 }
 
 export async function testCustomIntegration(input) {
