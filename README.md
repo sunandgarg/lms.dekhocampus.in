@@ -1,6 +1,6 @@
 # DekhoCampus LMS
 
-React frontend and Node.js API for lead intake, partner delivery, CRM, reporting, and URL shortening. MySQL stores application records. Every lead delivery writes its request and response to a private S3 archive; uploaded source files are archived before processing. Each batch has a downloadable ZIP with its source files, transactions, and `report.csv`.
+React frontend and Node.js API for lead intake, partner delivery, CRM, reporting, and URL shortening. MySQL stores application records. Every new lead delivery writes its request and response to a private S3 archive; uploaded source files are archived before processing. Each new batch has a downloadable ZIP with its source files, transactions, and `report.csv`.
 
 ## Local development
 
@@ -30,7 +30,8 @@ Only run bootstrap once. Keep credentials out of Git. Build the frontend with `n
 - The server sends at most two partner requests at once. A delivery interrupted by a server restart is marked for review to avoid an automatic duplicate send.
 - Download a batch ZIP from Upload History. Source files and each transaction are read from S3; the CSV report is generated from MySQL.
 - MySQL and S3 both incur storage charges as usage grows. The 2 GB swap file is on the included Lightsail disk.
-- Create users from the admin panel. A new installation starts with an empty database; it does not import data from the earlier system.
+- Create and manage users from the admin panel. The production database includes the application records from the November 20, 2026 backup. The original backup and pre-import MySQL snapshot are retained in the private S3 bucket under `migrations/2026-11-20/`.
+- The backup contained historical batch summaries but no original uploaded CSVs, lead rows, or transaction files. ZIPs for those batches include a migration note and a summary report. New uploads archive their source files and transactions in S3.
 
 ## Checks
 
