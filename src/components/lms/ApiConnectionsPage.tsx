@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Copy, Plus, Eye, EyeOff, Key, Loader2, Check, Trash2, RefreshCw } from 'lucide-react';
 import { api } from '@/integrations/api/client';
+import { GenericLeadConnections } from './GenericLeadConnections';
 
 interface ApiKeyRow {
   id: string;
@@ -159,10 +160,12 @@ export function ApiConnectionsPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="h-4 w-4 mr-1" /> Refresh</Button>
           <Button onClick={() => { setShowModal(true); setGeneratedKey(''); setNewName(''); setNewIps(''); setSelectedUniId(''); }}>
-            <Plus className="h-4 w-4 mr-2" /> Generate API Key
+            <Plus className="h-4 w-4 mr-2" /> University API Key
           </Button>
         </div>
       </div>
+
+      <GenericLeadConnections universities={universities} />
 
       {/* Endpoint Info */}
       <Card className="p-5 space-y-4">

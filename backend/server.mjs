@@ -10,6 +10,7 @@ import { processLead, processLeadBatch } from './lead-processor.mjs';
 import { resolveShortUrl } from './redirect.mjs';
 import { manageUsers } from './admin-users.mjs';
 import { receiveLead } from './inbound.mjs';
+import { createGenericConnection, listGenericConnections, receiveGenericLead, updateGenericConnection } from './generic-inbound.mjs';
 import { processQueue, serverIp, verifyDomain } from './misc-functions.mjs';
 import { canUpload, isAdmin, requireOwnedBatch, userRecords } from './access.mjs';
 import { batchReport } from './report.mjs';
@@ -148,6 +149,12 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
         const result = await receiveLead({ db, s3, bucket, payload, bearerKey });
         return send(response, 200, result, { 'Access-Control-Allow-Origin': '*' });
       }
+      if (url.pathname === '/api/inbound/generic-lead' && method === 'POST') {
+        const authorization = String(request.headers.authorization || '');
+        const token = authorization.replace(/^Bearer\s+/i, '');
+        return send(response, 202, await receiveGenericLead({ db, s3, bucket, token,
+          payload: await readJson(request), idempotencyKey: request.headers['idempotency-key'] }));
+      }
       if (url.pathname === '/api/webhooks/meta-ads-webhook' && method === 'GET') {
         if (url.searchParams.get('hub.mode') !== 'subscribe') return send(response, 400, { error: 'Invalid verification mode' });
         const challenge = await verifyMeta(db, url.searchParams.get('hub.verify_token'), url.searchParams.get('hub.challenge'));
@@ -189,6 +196,32 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
       const user = await sessionUser(db, request);
       if (!user || !user.is_approved) return send(response, 401, { error: 'Sign in required' });
       if (url.pathname === '/api/auth/me' && method === 'GET') return send(response, 200, { user: clientUser(user) });
+
+      if (url.pathname === '/api/generic-connections' && method === 'GET') {
+        requireAdmin(user);
+        return send(response, 200, { connections: await listGenericConnections(db) });
+      }
+      if (url.pathname === '/api/generic-connections' && method === 'POST') {
+        requireAdmin(user);
+        return send(response, 201, await createGenericConnection(db, await readJson(request), user.id));
+      }
+      const genericConnection = /^\/api\/generic-connections\/([0-9a-f-]{36})$/.exec(url.pathname);
+      if (genericConnection && method === 'PATCH') {
+        requireAdmin(user);
+        return send(response, 200, { connection: await updateGenericConnection(db, genericConnection[1], await readJson(request)) });
+      }
+      const inboundArchive = /^\/api\/inbound\/generic-leads\/([0-9a-f-]{36})\/archive\.zip$/.exec(url.pathname);
+      if (inboundArchive && method === 'GET') {
+        requireAdmin(user);
+        checkBatchId(inboundArchive[1]);
+        const { data: lead } = await executeRecords(db, { table: 'inbound_leads', select: 'id',
+          filters: [{ field: 'id', op: 'eq', value: inboundArchive[1] }], single: true });
+        if (!lead) return send(response, 404, { error: 'Lead not found' });
+        response.writeHead(200, { 'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="inbound-lead-${lead.id}.zip"`,
+          'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return streamBatchZip({ s3, bucket, batchId: lead.id, output: response });
+      }
 
       if (url.pathname === '/api/db/export' && method === 'GET') {
         requireAdmin(user);

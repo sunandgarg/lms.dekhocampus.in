@@ -31,6 +31,10 @@ export interface LmsLead {
   retryCount: number;
   batchId: string;
   triggerSource: string;
+  isInbound?: boolean;
+  destinationCount?: number;
+  batchIds?: string[];
+  extraData?: Record<string, string>;
 }
 
 function formatDate(iso: string) {
@@ -73,7 +77,11 @@ function downloadCSV(data: LmsLead[], filename: string) {
     l.failReason,
     l.receivedAt,
   ]);
-  const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+  const csv = [headers, ...rows].map((r) => r.map((c) => {
+    const text = String(c || '');
+    const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+    return `"${safe.replace(/"/g, '""')}"`;
+  }).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -89,17 +97,16 @@ function mapStatus(s: string | null): string {
   if (s === "Fail" || s === "failed") return "Failed";
   if (s === "Duplicate" || s === "duplicate") return "Duplicate";
   if (s === "Needs_Review") return "Needs review";
+  if (s === "Received") return "Received";
   if (s === "pending") return "Pending";
   return s;
 }
 
-// Cache for leads data
-let leadsCache: { data: LmsLead[]; timestamp: number } | null = null;
-const CACHE_TTL = 60000; // 1 minute
-
 export function AllLeadsPage() {
   const { toast } = useToast();
   const [leads, setLeads] = useState<LmsLead[]>([]);
+  const [pageCount, setPageCount] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -109,21 +116,26 @@ export function AllLeadsPage() {
   const [cityFilter, setCityFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailLead, setDetailLead] = useState<LmsLead | null>(null);
+  const [routeBatches, setRouteBatches] = useState<any[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [sortCol, setSortCol] = useState<string>("receivedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const fetchLeads = useCallback(
-    async (forceRefresh = false) => {
-      // Use cache if available and not expired
-      if (!forceRefresh && leadsCache && Date.now() - leadsCache.timestamp < CACHE_TTL) {
-        setLeads(leadsCache.data);
-        setLoading(false);
-        return;
-      }
-
+    async (_forceRefresh = false) => {
       setLoading(true);
       try {
+        const inboundData: any[] = [];
+        let inboundHasMore = false;
+        for (let page = 0; page < pageCount; page++) {
+          const { data, error } = await api.from('inbound_leads')
+            .select('*').order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
+          if (error && error.status !== 403) throw error;
+          if (error) break;
+          inboundData.push(...(data || []));
+          inboundHasMore = data?.length === 500;
+          if (!inboundHasMore) break;
+        }
         // Only fetch leads that came from campaigns/external sources - NOT from CSV upload batches
         // We identify upload-pushed leads by checking if their batch came from a file upload
         // Instead, we filter by looking at batches where file_name starts with 'API_' (external)
@@ -139,21 +151,18 @@ export function AllLeadsPage() {
 
         const excludeBatchIds = (uploadBatchIds || []).map((b) => b.id);
 
-        let query = api
-          .from("leads")
-          .select("*, universities(name)")
-          .order("created_at", { ascending: false })
-          .limit(500);
-
-        // Exclude leads from CSV upload batches
-        if (excludeBatchIds.length > 0) {
-          // Use not.in to exclude CSV upload batch leads
-          query = query.not("batch_id", "in", `(${excludeBatchIds.join(",")})`);
+        const leadsData: any[] = [];
+        let existingHasMore = false;
+        for (let page = 0; page < pageCount; page++) {
+          let query = api.from('leads').select('*, universities(name)')
+            .order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
+          if (excludeBatchIds.length > 0) query = query.not('batch_id', 'in', `(${excludeBatchIds.join(',')})`);
+          const { data, error } = await query;
+          if (error) throw error;
+          leadsData.push(...(data || []));
+          existingHasMore = data?.length === 500;
+          if (!existingHasMore) break;
         }
-
-        const { data: leadsData, error } = await query;
-
-        if (error) throw error;
 
         const mapped: LmsLead[] = (leadsData || []).map((l: any) => ({
           id: l.id,
@@ -176,8 +185,19 @@ export function AllLeadsPage() {
           triggerSource: l.lead_source || "Unknown",
         }));
 
-        setLeads(mapped);
-        leadsCache = { data: mapped, timestamp: Date.now() };
+        const incoming: LmsLead[] = (inboundData || []).map((lead: any) => ({
+          id: lead.id, name: lead.name || '', email: lead.email || '', mobile: lead.mobile || '',
+          city: lead.city || '', course: lead.course || '', specialization: '',
+          source: lead.source || lead.connection_name || 'Generic API', campaign: lead.campaign || '',
+          university: lead.batch_ids?.length ? `${lead.batch_ids.length} destinations` : 'Inbox only',
+          universityId: '', status: 'Received', failReason: '', receivedAt: lead.created_at,
+          apiResponse: '', retryCount: 0, batchId: '', triggerSource: lead.connection_name || 'Generic API',
+          isInbound: true, destinationCount: lead.batch_ids?.length || 0,
+          batchIds: lead.batch_ids || [],
+          extraData: lead.extra_data || {},
+        }));
+        setLeads([...incoming, ...mapped].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)));
+        setHasMore(inboundHasMore || existingHasMore);
       } catch (err: any) {
         console.error("Error fetching leads:", err);
         toast({ title: "Error", description: "Failed to load leads", variant: "destructive" });
@@ -185,12 +205,19 @@ export function AllLeadsPage() {
         setLoading(false);
       }
     },
-    [toast],
+    [toast, pageCount],
   );
 
   useEffect(() => {
     fetchLeads();
   }, [fetchLeads]);
+
+  useEffect(() => {
+    setRouteBatches([]);
+    if (!detailLead?.batchIds?.length) return;
+    api.from('upload_batches').select('id,status,success_count,duplicate_count,fail_count,error_message,universities(name)')
+      .in('id', detailLead.batchIds).then(({ data }) => setRouteBatches(data || []));
+  }, [detailLead]);
 
   const filtered = useMemo(() => {
     let result = leads.filter((l) => {
@@ -255,11 +282,11 @@ export function AllLeadsPage() {
   const handleRetryLead = useCallback(
     async (lead: LmsLead) => {
       toast({ title: "Retrying...", description: `Retrying ${lead.name}` });
-      const { error } = await api.from("leads").update({ status: "pending" }).eq("id", lead.id);
+      const { error } = await api.functions.invoke('retry-leads', { body: { lead_ids: [lead.id] } });
       if (error) {
         toast({ title: "Error", description: error.message, variant: "destructive" });
       } else {
-        toast({ title: "Queued", description: `${lead.name} queued for retry` });
+        toast({ title: "Retry finished", description: `${lead.name} was sent again and archived` });
         fetchLeads(true);
       }
     },
@@ -272,11 +299,11 @@ export function AllLeadsPage() {
       toast({ title: "No failed leads", description: "Select failed leads to retry", variant: "destructive" });
       return;
     }
-    const { error } = await api.from("leads").update({ status: "pending" }).in("id", failedIds);
+    const { error } = await api.functions.invoke('retry-leads', { body: { lead_ids: failedIds.slice(0, 100) } });
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Queued", description: `${failedIds.length} leads queued for retry` });
+      toast({ title: "Retries finished", description: `${Math.min(failedIds.length, 100)} leads were sent again and archived` });
       setSelectedIds(new Set());
       fetchLeads(true);
     }
@@ -289,6 +316,7 @@ export function AllLeadsPage() {
       Pending: "badge-warning",
       New: "badge-info",
       Duplicate: "badge-warning",
+      Received: "badge-info",
     };
     return <span className={map[s] || "badge-info"}>{s}</span>;
   };
@@ -312,7 +340,7 @@ export function AllLeadsPage() {
         <div>
           <h1 className="text-2xl font-display font-bold text-foreground">All Leads</h1>
           <p className="text-xs text-muted-foreground">
-            Shows leads from campaigns, external APIs, Facebook, Google - excludes CSV upload leads
+            Shows incoming leads from generic APIs, campaigns, and external sources. CSV upload leads appear in Upload History.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => fetchLeads(true)} disabled={loading}>
@@ -328,6 +356,7 @@ export function AllLeadsPage() {
           { label: "Duplicate", value: stats.duplicate, filter: "Duplicate", color: "bg-amber-500/10 text-amber-600" },
           { label: "Failed", value: stats.failed, filter: "Failed", color: "bg-destructive/10 text-destructive" },
           { label: "Pending", value: stats.pending, filter: "Pending", color: "bg-warning/10 text-warning" },
+          { label: "Received", value: leads.filter((lead) => lead.status === 'Received').length, filter: "Received", color: "bg-primary/10 text-primary" },
           { label: "Push Rate", value: `${stats.rate}%`, filter: "", color: "bg-primary/10 text-primary" },
         ].map((k) => (
           <button
@@ -385,6 +414,7 @@ export function AllLeadsPage() {
               <SelectItem value="Duplicate">Duplicate</SelectItem>
               <SelectItem value="Failed">Failed</SelectItem>
               <SelectItem value="Pending">Pending</SelectItem>
+              <SelectItem value="Received">Received</SelectItem>
             </SelectContent>
           </Select>
           <Select value={sourceFilter} onValueChange={setSourceFilter}>
@@ -499,7 +529,7 @@ export function AllLeadsPage() {
                 {filtered.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={12} className="text-center py-12 text-muted-foreground">
-                      No leads found. Leads from campaigns, external APIs, Facebook & Google will appear here.
+                      No leads found. Incoming generic API and campaign leads will appear here.
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -535,6 +565,9 @@ export function AllLeadsPage() {
                           >
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
+                          {lead.isInbound && <Button asChild variant="ghost" size="icon" className="h-7 w-7" title="Download original payload ZIP">
+                            <a href={`/api/inbound/generic-leads/${lead.id}/archive.zip`}><Download className="h-3.5 w-3.5" /></a>
+                          </Button>}
                           {lead.status === "Failed" && (
                             <Button
                               variant="ghost"
@@ -556,6 +589,10 @@ export function AllLeadsPage() {
           )}
         </div>
       </Card>
+
+      {hasMore && <div className="text-center"><Button variant="outline" onClick={() => setPageCount((count) => count + 1)} disabled={loading}>
+        Load older leads
+      </Button></div>}
 
       {/* Lead Detail Drawer */}
       <Sheet open={!!detailLead} onOpenChange={() => setDetailLead(null)}>
@@ -591,6 +628,24 @@ export function AllLeadsPage() {
                     <pre className="mt-1 text-xs overflow-x-auto whitespace-pre-wrap">{detailLead.apiResponse}</pre>
                   </div>
                 )}
+
+                {detailLead.isInbound && <div className="space-y-2 border-t pt-4">
+                  <Button asChild variant="outline" size="sm"><a href={`/api/inbound/generic-leads/${detailLead.id}/archive.zip`}>
+                    <Download className="h-4 w-4 mr-2" /> Download incoming payload ZIP
+                  </a></Button>
+                  <p className="text-sm font-medium">Auto-push destinations</p>
+                  {detailLead.destinationCount === 0 ? <p className="text-xs text-muted-foreground">Collect only — no automatic push configured.</p>
+                    : routeBatches.length === 0 ? <p className="text-xs text-muted-foreground">Loading delivery status...</p>
+                    : routeBatches.map((batch) => <div key={batch.id} className="text-sm border rounded p-2">
+                      <span className="font-medium">{batch.universities?.name || 'University'}</span>: {batch.status}
+                      {batch.error_message && <p className="text-xs text-destructive">{batch.error_message}</p>}
+                    </div>)}
+                  {detailLead.extraData && Object.keys(detailLead.extraData).length > 0 && <div className="pt-2">
+                    <p className="text-sm font-medium">Incoming fields</p>
+                    <div className="text-xs break-all">{Object.entries(detailLead.extraData).map(([field, value]) =>
+                      <p key={field}><strong>{field}:</strong> {String(value)}</p>)}</div>
+                  </div>}
+                </div>}
 
                 {detailLead.status === "Failed" && (
                   <Button

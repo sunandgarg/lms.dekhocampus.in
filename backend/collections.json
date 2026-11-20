@@ -386,6 +386,38 @@
     "updated_at",
     "whatsapp_sent"
   ],
+  "inbound_connections": [
+    "created_at",
+    "destination_ids",
+    "field_map",
+    "id",
+    "is_active",
+    "key_hash",
+    "last_used_at",
+    "name",
+    "request_count",
+    "source_label",
+    "updated_at",
+    "user_id"
+  ],
+  "inbound_leads": [
+    "batch_ids",
+    "campaign",
+    "city",
+    "connection_id",
+    "connection_name",
+    "course",
+    "created_at",
+    "email",
+    "extra_data",
+    "id",
+    "mobile",
+    "name",
+    "source",
+    "status",
+    "university_id",
+    "user_id"
+  ],
   "landing_pages": [
     "api_key",
     "created_at",

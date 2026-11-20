@@ -71,3 +71,12 @@ CREATE TABLE IF NOT EXISTS lms_lead_queue (
   PRIMARY KEY (batch_id, lead_index),
   INDEX queue_next (status, created_at)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS lms_inbound_ids (
+  connection_id CHAR(36) NOT NULL,
+  external_key_hash BINARY(32) NOT NULL,
+  payload_hash BINARY(32) NOT NULL,
+  lead_id CHAR(36) NOT NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (connection_id, external_key_hash)
+) ENGINE=InnoDB;

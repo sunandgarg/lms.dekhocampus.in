@@ -1,7 +1,7 @@
 import collections from './collections.json' with { type: 'json' };
 import { executeRecords } from './records.mjs';
 
-const RETAINED = new Set(['upload_batches', 'leads', 'api_logs']);
+const RETAINED = new Set(['upload_batches', 'leads', 'inbound_leads', 'api_logs']);
 
 export async function* exportData(db) {
   yield `{"exported_at":${JSON.stringify(new Date().toISOString())},"version":3,"tables":{`;

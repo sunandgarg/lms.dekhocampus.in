@@ -187,7 +187,7 @@ async function matching(db, query) {
 export async function executeRecords(db, query) {
   if (!query || !collections[query.table]) throw bad('Unknown collection');
   const action = query.action || 'select';
-  if (action === 'delete' && ['upload_batches', 'leads', 'api_logs'].includes(query.table)) {
+  if (action === 'delete' && ['upload_batches', 'leads', 'inbound_leads', 'api_logs'].includes(query.table)) {
     const error = new Error('Lead history is retained so batch ZIP reports remain available');
     error.status = 403;
     throw error;
