@@ -4,6 +4,7 @@ import { archiveAndDeliver } from './archive.mjs';
 import { buildPayload, categorizeResponse } from './lead-payload.mjs';
 import { executeRecords } from './records.mjs';
 import { syncLeadToCrm } from './crm-sync.mjs';
+import { updateLeadStats } from './stats.mjs';
 
 let activeDeliveries = 0;
 const waitingDeliveries = [];
@@ -222,6 +223,8 @@ export async function processLead({ db, s3, bucket, task, userId }) {
     campaign: task.leadData.leadCampaign || null,
   } });
   await incrementBatch(db, task.batchId, result.status);
+  try { await updateLeadStats(db, task, result); }
+  catch (error) { console.error('Lead stats update failed for batch', task.batchId, error); }
   if (result.status === 'Success') {
     try { await syncLeadToCrm(db, savedLead); }
     catch (error) { console.error('CRM sync failed for lead', savedLead.id, error); }

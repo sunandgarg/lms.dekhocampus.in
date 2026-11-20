@@ -15,7 +15,7 @@ export function DataRetentionNotice({ className, variant = 'inline' }: DataReten
       )}>
         <Archive className="h-4 w-4 shrink-0" />
         <span>
-          <strong>Private archive:</strong> Source CSV and each lead transaction are saved in S3. Download a batch ZIP from its history row.
+          <strong>Private archive:</strong> New uploads save source CSV and each lead transaction in S3. Download a batch ZIP from its history row.
         </span>
       </div>
     );
@@ -24,7 +24,7 @@ export function DataRetentionNotice({ className, variant = 'inline' }: DataReten
   return (
     <p className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", className)}>
       <Archive className="h-3 w-3" />
-      Lead transactions are archived in private S3
+      New lead transactions are archived in private S3
     </p>
   );
 }

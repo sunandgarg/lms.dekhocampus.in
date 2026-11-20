@@ -65,8 +65,9 @@ test('batch ZIP can be regenerated from saved S3 objects', async () => {
     if (command instanceof GetObjectCommand) return { Body: Readable.from(['name\nA']) };
     throw new Error('Unexpected S3 command');
   } };
-  await streamBatchZip({ s3, bucket: 'archive', batchId, output });
+  await streamBatchZip({ s3, bucket: 'archive', batchId, output, migrationNote: 'Historical source unavailable' });
   const zip = await bytes;
   assert.equal(zip.subarray(0, 4).toString('hex'), '504b0304');
   assert.match(zip.toString(), /source\/leads.csv/);
+  assert.match(zip.toString(), /MIGRATION-NOTE.txt/);
 });

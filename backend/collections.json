@@ -1042,6 +1042,7 @@
     "error_message",
     "fail_count",
     "file_name",
+    "historical_import_without_source",
     "id",
     "is_cancelled",
     "is_paused",

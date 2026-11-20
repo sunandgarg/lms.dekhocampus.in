@@ -15,6 +15,7 @@ interface UploadBatch {
   status: string;
   created_at: string;
   completed_at: string | null;
+  historical_import_without_source?: boolean;
 }
 
 interface University {
@@ -65,7 +66,7 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
       try {
         let query = api
           .from("upload_batches")
-          .select("id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, created_at, completed_at")
+          .select("id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, created_at, completed_at, historical_import_without_source")
           .order("created_at", { ascending: false });
 
         if (selectedUniversity) query = query.eq("university_id", selectedUniversity);
@@ -310,8 +311,8 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
                             <BarChart3 className="h-3.5 w-3.5" />
                             {expandedBatch === batch.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                           </button>
-                          <a href={`/api/batches/${batch.id}/archive.zip`} title="Download source and transaction ZIP" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                            <Download className="h-3.5 w-3.5" /> ZIP
+                          <a href={`/api/batches/${batch.id}/archive.zip`} title={batch.historical_import_without_source ? "Historical summary only; original CSV and lead files were absent from the backup" : "Download source and transaction ZIP"} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                            <Download className="h-3.5 w-3.5" /> {batch.historical_import_without_source ? 'ZIP (summary only)' : 'ZIP'}
                           </a>
                         </div>
                       </td>

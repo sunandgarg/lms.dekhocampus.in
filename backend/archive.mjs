@@ -79,12 +79,13 @@ export async function saveSourceFile({ s3, bucket, batchId, filename, body, cont
   return key;
 }
 
-export async function streamBatchZip({ s3, bucket, batchId, output, reportRows }) {
+export async function streamBatchZip({ s3, bucket, batchId, output, reportRows, migrationNote }) {
   const prefix = batchPrefix(batchId);
   const zip = new yazl.ZipFile();
   zip.outputStream.on('error', (error) => output.destroy(error));
   zip.outputStream.pipe(output);
   if (reportRows) zip.addReadStreamLazy('report.csv', (done) => done(null, Readable.from(reportRows)));
+  if (migrationNote) zip.addBuffer(Buffer.from(migrationNote, 'utf8'), 'MIGRATION-NOTE.txt');
 
   let token;
   do {

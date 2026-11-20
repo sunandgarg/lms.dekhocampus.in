@@ -304,6 +304,11 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
         checkBatchId(archive[1]);
         await requireOwnedBatch(db, user, archive[1]);
         if (!bucket) throw new Error('Archive bucket is not configured');
+        const [batchRows] = await db.execute("SELECT data FROM lms_records WHERE collection = 'upload_batches' AND id = ?", [archive[1]]);
+        const batch = batchRows[0]?.data;
+        const migrationNote = batch?.historical_import_without_source
+          ? 'Historical batch metadata was imported from the November 20, 2026 database backup. The backup contained batch counts, but no original CSV data, lead rows, or transaction files for this batch. The full original backup is retained privately in S3 under migrations/2026-11-20/source-postgres-backup.tar.gz. The included report.csv therefore cannot reconstruct individual historical leads.\n'
+          : null;
         response.writeHead(200, {
           'Content-Type': 'application/zip',
           'Content-Disposition': `attachment; filename="lms-batch-${archive[1]}.zip"`,
@@ -311,7 +316,7 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
           'X-Content-Type-Options': 'nosniff',
         });
         return streamBatchZip({ s3, bucket, batchId: archive[1], output: response,
-          reportRows: batchReport(db, archive[1]) });
+          reportRows: batchReport(db, archive[1]), migrationNote });
       }
 
       return send(response, 404, { error: 'Not found' });
