@@ -1904,8 +1904,8 @@ export function UploadLeadsTab({
       if (!mapping) throw new Error('University configuration is unavailable');
       const apiConfig = { columnMapping: mapping.columnMapping,
         customColumnMapping: mapping.customColumnMapping, apiTimeoutSeconds: mapping.apiTimeoutSeconds };
-      for (let start = 0; start < leads.length; start += 50) {
-        const tasks = leads.slice(start, start + 50).map((lead, offset) => ({
+      for (let start = 0; start < leads.length; start += 10) {
+        const tasks = leads.slice(start, start + 10).map((lead, offset) => ({
           index: start + offset,
           apiConfig,
           leadData: {
