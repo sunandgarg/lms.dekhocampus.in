@@ -15,7 +15,7 @@ export function DataRetentionNotice({ className, variant = 'inline' }: DataReten
       )}>
         <Archive className="h-4 w-4 shrink-0" />
         <span>
-          <strong>Private archive:</strong> New uploads save source CSV and each lead transaction in S3. Download a batch ZIP from its history row.
+          <strong>Private archive:</strong> Uploads and incoming API leads save their original data in S3. Partner delivery records are included in batch ZIPs.
         </span>
       </div>
     );

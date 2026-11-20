@@ -251,7 +251,8 @@ export function AllLeadsPage() {
       else if (l.status === "Duplicate") duplicate++;
     }
     const total = leads.length;
-    return { total, pushed, failed, pending, duplicate, rate: total ? ((pushed / total) * 100).toFixed(1) : "0" };
+    const attempted = pushed + failed + duplicate;
+    return { total, pushed, failed, pending, duplicate, rate: attempted ? ((pushed / attempted) * 100).toFixed(1) : "0" };
   }, [leads]);
 
   const sources = useMemo(() => [...new Set(leads.map((l) => l.source).filter(Boolean))], [leads]);
