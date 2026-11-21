@@ -28,6 +28,11 @@ const OPERATORS = [
   ['is_empty', 'is empty'], ['is_not_empty', 'is not empty'],
 ] as const;
 const NEEDS_VALUE = new Set(['is', 'is_not', 'contains', 'not_contains', 'starts_with']);
+const INCOMING_LEAD_COLUMNS = [
+  { label: 'Name', value: 'name' }, { label: 'Email', value: 'email' },
+  { label: 'Mobile', value: 'mobile' }, { label: 'Source', value: 'source' },
+  { label: 'Medium', value: 'leadMedium' }, { label: 'Campaign', value: 'campaign' },
+];
 
 export function LeadAutomationSettings() {
   const { toast } = useToast();
@@ -227,11 +232,17 @@ export function LeadAutomationSettings() {
                         defaults: [...current.defaults.filter((item) => item.targetField !== field.name),
                           ...(event.target.value ? [{ targetField: field.name, value: event.target.value }] : [])] }))} /></td></tr>)}</tbody>
                 </table></div> : <p className="text-xs text-muted-foreground">Add partner payload fields in the university integration before setting field values here.</p>}
-              {!!fields.length && <div className="space-y-2"><div><h4 className="text-sm font-semibold">Conditional field values</h4><p className="text-xs text-muted-foreground">The first box is an incoming LMS lead field (or a field from the incoming API payload), not a partner API key. Leave Equals blank to match an empty or missing field. The first matching row for a partner field wins.</p></div>
-                <div className="hidden sm:grid sm:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 px-2 text-xs font-medium text-muted-foreground"><span>Incoming lead field</span><span>Equals (blank = empty)</span><span>Partner API field</span><span>Send this value</span><span className="w-9" /></div>
+              {!!fields.length && <div className="space-y-2"><div><h4 className="text-sm font-semibold">Conditional field values</h4><p className="text-xs text-muted-foreground">Choose an incoming All Leads column. Leave Equals blank to match an empty or missing value. The first matching row for a partner field wins.</p></div>
+                <div className="hidden sm:grid sm:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 px-2 text-xs font-medium text-muted-foreground"><span>All Leads column</span><span>Equals (blank = empty)</span><span>Partner API field</span><span>Send this value</span><span className="w-9" /></div>
                 {override.transforms.map((row,index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md bg-muted/30 p-2 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] sm:items-center">
-                  <Input list="lead-automation-fields" aria-label="Incoming lead field" placeholder="e.g. city or leadMedium" value={row.sourceField} maxLength={100}
-                    onChange={(event) => updateOverrides(id, (current) => ({ ...current, transforms: current.transforms.map((item,i) => i === index ? { ...item, sourceField: event.target.value } : item) }))} />
+                  <Select value={row.sourceField} onValueChange={(value) => updateOverrides(id, (current) => ({ ...current, transforms: current.transforms.map((item,i) => i === index ? { ...item, sourceField: value } : item) }))}>
+                    <SelectTrigger aria-label="All Leads column"><SelectValue placeholder="Select column" /></SelectTrigger>
+                    <SelectContent>
+                      {INCOMING_LEAD_COLUMNS.map((column) => <SelectItem key={column.value} value={column.value}>{column.label}</SelectItem>)}
+                      {row.sourceField && !INCOMING_LEAD_COLUMNS.some((column) => column.value === row.sourceField) &&
+                        <SelectItem value={row.sourceField} disabled>{row.sourceField} (existing rule)</SelectItem>}
+                    </SelectContent>
+                  </Select>
                   <Input aria-label="Equals value; leave empty to match blank" placeholder="Leave blank to match empty" value={row.equals} maxLength={1000}
                     onChange={(event) => updateOverrides(id, (current) => ({ ...current, transforms: current.transforms.map((item,i) => i === index ? { ...item, equals: event.target.value } : item) }))} />
                   <Select value={row.targetField} onValueChange={(value) => updateOverrides(id, (current) => ({ ...current, transforms: current.transforms.map((item,i) => i === index ? { ...item, targetField: value } : item) }))}>

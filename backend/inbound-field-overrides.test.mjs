@@ -53,6 +53,14 @@ test('an empty equals value matches blank or missing incoming fields only', () =
   assert.equal(applyInboundFieldOverrides({ state: 'Delhi' }, { state: 'Delhi' }, university, settings), null);
 });
 
+test('All Leads Medium column uses the normalized incoming lead medium', () => {
+  const lead = { leadMedium: 'paid' };
+  const changed = applyInboundFieldOverrides(lead, lead, university, {
+    transforms: [{ sourceField: 'leadMedium', equals: 'paid', targetField: 'program', value: 'Paid campaign' }],
+  });
+  assert.equal(JSON.parse(changed.columnMapping.__field_course).staticValue, 'Paid campaign');
+});
+
 test('partner credentials stay hidden from team configuration while delivery retains them', () => {
   const stored = { __static_AccessKey: 'private', __field_key: JSON.stringify({ fieldName: 'AccessKey', sourceType: 'static', staticValue: 'private' }) };
   const visible = redactPartnerMapping(stored);
