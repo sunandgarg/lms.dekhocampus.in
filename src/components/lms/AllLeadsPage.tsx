@@ -462,7 +462,9 @@ export function AllLeadsPage() {
         </div>
       </div>
 
-      {showAutomation && <LeadAutomationSettings />}
+      {showAutomation && <LeadAutomationSettings incomingExtraFields={[...new Set(leads
+        .filter((lead) => lead.isInbound)
+        .flatMap((lead) => Object.keys(lead.extraData || {})))].sort()} />}
 
       <Card className="overflow-hidden rounded-2xl border-primary/20 bg-gradient-to-r from-primary/10 via-background to-background shadow-sm">
         <div className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center md:p-6">

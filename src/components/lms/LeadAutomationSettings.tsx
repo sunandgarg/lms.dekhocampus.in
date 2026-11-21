@@ -30,11 +30,25 @@ const OPERATORS = [
 const NEEDS_VALUE = new Set(['is', 'is_not', 'contains', 'not_contains', 'starts_with']);
 const INCOMING_LEAD_COLUMNS = [
   { label: 'Name', value: 'name' }, { label: 'Email', value: 'email' },
-  { label: 'Mobile', value: 'mobile' }, { label: 'Source', value: 'source' },
-  { label: 'Medium', value: 'leadMedium' }, { label: 'Campaign', value: 'campaign' },
+  { label: 'Mobile', value: 'mobile' }, { label: 'City', value: 'city' },
+  { label: 'State', value: 'state' }, { label: 'Course / interest', value: 'course' },
+  { label: 'Specialization', value: 'specialization' }, { label: 'Address', value: 'address' },
+  { label: 'Source', value: 'source' }, { label: 'Medium', value: 'leadMedium' },
+  { label: 'Campaign', value: 'campaign' },
+  { label: 'UTM source', value: 'utm_source' }, { label: 'UTM medium', value: 'utm_medium' },
+  { label: 'UTM campaign', value: 'utm_campaign' }, { label: 'UTM term', value: 'utm_term' },
+  { label: 'UTM content', value: 'utm_content' },
+  { label: 'Campus', value: 'campus' }, { label: 'Exam', value: 'exam' },
+  { label: 'Category', value: 'category' }, { label: 'Mode', value: 'mode' },
+  { label: 'Device', value: 'device' }, { label: 'CTA source', value: 'cta_source' },
+  { label: 'Landing page', value: 'landing_page' }, { label: 'Page', value: 'page' },
+  { label: 'Last query', value: 'last_query' }, { label: 'Consent', value: 'consent' },
+  { label: 'OTP verified', value: 'otp_verified' },
+  { label: 'First instance date', value: 'first_instance_date' },
+  { label: 'Registration date', value: 'date_of_registration' },
 ];
 
-export function LeadAutomationSettings() {
+export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingExtraFields?: string[] }) {
   const { toast } = useToast();
   const [rules, setRules] = useState<Rule[]>([]);
   const [universities, setUniversities] = useState<University[]>([]);
@@ -48,6 +62,10 @@ export function LeadAutomationSettings() {
   const [destinations, setDestinations] = useState<string[]>([]);
   const [fieldOverrides, setFieldOverrides] = useState<Record<string, DestinationOverrides>>({});
   const [saving, setSaving] = useState(false);
+  const knownColumns = new Set(INCOMING_LEAD_COLUMNS.map((column) => column.value.toLowerCase()));
+  const incomingColumns = [...INCOMING_LEAD_COLUMNS, ...incomingExtraFields
+    .filter((field) => /^[\w.-]{1,100}$/.test(field) && !/key|secret|token|password|authorization/i.test(field) && !knownColumns.has(field.toLowerCase()))
+    .map((field) => ({ label: field, value: field }))];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -193,8 +211,8 @@ export function LeadAutomationSettings() {
               <Button variant="ghost" size="icon" aria-label="Remove condition"
                 onClick={() => setConditions((prev) => prev.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4" /></Button>
             </div>)}</div>
-            <datalist id="lead-automation-fields">{['name', 'email', 'mobile', 'city', 'state', 'course', 'source', 'campaign', 'leadMedium']
-              .map((field) => <option key={field} value={field} />)}</datalist>
+            <datalist id="lead-automation-fields">{incomingColumns.map((column) =>
+              <option key={column.value} value={column.value} label={column.label} />)}</datalist>
             <Button size="sm" variant="outline" className="mt-2" onClick={() =>
               setConditions((prev) => [...prev, { field: 'city', operator: 'is', value: '' }])}>
               <Plus className="h-3 w-3 mr-1" /> Add condition
@@ -238,8 +256,8 @@ export function LeadAutomationSettings() {
                   <Select value={row.sourceField} onValueChange={(value) => updateOverrides(id, (current) => ({ ...current, transforms: current.transforms.map((item,i) => i === index ? { ...item, sourceField: value } : item) }))}>
                     <SelectTrigger aria-label="All Leads column"><SelectValue placeholder="Select column" /></SelectTrigger>
                     <SelectContent>
-                      {INCOMING_LEAD_COLUMNS.map((column) => <SelectItem key={column.value} value={column.value}>{column.label}</SelectItem>)}
-                      {row.sourceField && !INCOMING_LEAD_COLUMNS.some((column) => column.value === row.sourceField) &&
+                      {incomingColumns.map((column) => <SelectItem key={column.value} value={column.value}>{column.label}</SelectItem>)}
+                      {row.sourceField && !incomingColumns.some((column) => column.value === row.sourceField) &&
                         <SelectItem value={row.sourceField} disabled>{row.sourceField} (existing rule)</SelectItem>}
                     </SelectContent>
                   </Select>
