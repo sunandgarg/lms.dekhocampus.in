@@ -34,14 +34,20 @@ async function integrationFor(db, platform, key) {
 }
 
 function normalizeLead(raw, platform, campaign) {
+  const email = String(raw.email || raw.email_address || '').trim();
+  const mobile = String(raw.mobile || raw.phone || raw.phone_number || '').trim();
   const lead = { name: raw.name || raw.full_name || raw.first_name || 'Unnamed Lead',
-    email: raw.email || raw.email_address || '', mobile: raw.mobile || raw.phone || raw.phone_number || '',
+    email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '',
+    mobile: /^[+\d\s().-]{7,25}$/.test(mobile) ? mobile : '',
     city: raw.city || '', state: raw.state || '', course: raw.course || raw.program || raw.interest || '',
     leadSource: platform === 'facebook' ? 'Facebook Lead Ads' : platform === 'bing' ? 'Bing Lead Ads' : 'Google Lead Ads',
     leadMedium: 'paid', leadCampaign: campaign || raw.campaign || raw.campaign_name || '' };
   if (!lead.email && !lead.mobile) fail(400, 'Webhook lead requires email or mobile');
-  return { ...Object.fromEntries(Object.entries(raw).filter(([, value]) =>
-    value != null && typeof value !== 'object').map(([field, value]) => [field, String(value)])),
+  const providerFields = Object.fromEntries(Object.entries(raw).filter(([, value]) =>
+    value != null && typeof value !== 'object').map(([field, value]) => [field, String(value)]));
+  if (!lead.mobile) for (const field of ['mobile', 'phone', 'phone_number', 'mobile_number', 'contact']) delete providerFields[field];
+  if (!lead.email) for (const field of ['email', 'email_address', 'email_id', 'mail']) delete providerFields[field];
+  return { ...providerFields,
     ...Object.fromEntries(Object.entries(lead).map(([field, value]) => [field, String(value)])),
     source: lead.leadSource, medium: lead.leadMedium, campaign: lead.leadCampaign };
 }

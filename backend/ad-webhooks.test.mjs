@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { googleLeads, verifyMetaSignature } from './ad-webhooks.mjs';
+import { normalizeGenericLead } from './generic-inbound.mjs';
 
 test('Meta webhook signature authenticates the exact request bytes', () => {
   const body = Buffer.from('{"object":"page","entry":[]}');
@@ -23,4 +24,15 @@ test('Google Ads published webhook shape accepts name and phone without email', 
   assert.equal(leads[0].email, '');
   assert.equal(leads[0].course, 'MBA');
   assert.equal(leads[0].external_id, 'google-123');
+});
+
+test('ad webhook keeps a usable email when the provider phone is invalid', () => {
+  const [lead] = googleLeads({ lead_id: 'test-456', user_column_data: [
+    { column_id: 'EMAIL', string_value: 'student@example.com' },
+    { column_id: 'PHONE_NUMBER', string_value: 'test phone' },
+  ] }, 'google');
+  assert.equal(lead.email, 'student@example.com');
+  assert.equal(lead.mobile, '');
+  assert.equal(lead.phone_number, undefined);
+  assert.equal(normalizeGenericLead({ lead }, { field_map: {}, source_label: 'Google Ads' }).lead.mobile, '');
 });
