@@ -21,7 +21,7 @@ import { aiGateway } from './ai.mjs';
 import { handleAdWebhook, verifyMeta } from './ad-webhooks.mjs';
 import { receiveEmailEvents } from './email-webhook.mjs';
 import { authorizeShortApi, shortAnalytics, shorten } from './short-api.mjs';
-import { retryLeads, runAutoRetries } from './retry.mjs';
+import { retryInboundDelivery, retryLeads, runAutoRetries } from './retry.mjs';
 import { enqueueLeads, sealQueue, workQueue, recoverQueue, controlBatch, activateScheduledBatches } from './queue.mjs';
 import { Readable } from 'node:stream';
 import { isIP } from 'node:net';
@@ -306,6 +306,12 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
         requireAdmin(user);
         const body = await readJson(request);
         return send(response, 200, await retryLeads({ db, s3, bucket, leadIds: body.lead_ids, userId: user.id }));
+      }
+      if (url.pathname === '/api/functions/retry-inbound-delivery' && method === 'POST') {
+        requireAdmin(user);
+        const body = await readJson(request);
+        return send(response, 200, await retryInboundDelivery({ db, s3, bucket,
+          batchId: body.batch_id, userId: user.id }));
       }
       if (url.pathname === '/api/functions/process-queue' && method === 'POST') {
         if (!await canUpload(db, user)) return send(response, 403, { error: 'Access denied' });

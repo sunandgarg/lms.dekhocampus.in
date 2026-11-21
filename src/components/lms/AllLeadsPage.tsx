@@ -193,6 +193,7 @@ export function AllLeadsPage() {
   const [dateTo, setDateTo] = useState('');
   const [segment, setSegment] = useState('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [retryingBatchId, setRetryingBatchId] = useState<string | null>(null);
   const [detailLead, setDetailLead] = useState<LmsLead | null>(null);
   const [showFilters, setShowFilters] = useState(true);
   const [sortCol, setSortCol] = useState<string>("receivedAt");
@@ -287,7 +288,7 @@ export function AllLeadsPage() {
           extraData: lead.extra_data || {},
           matchedRules: lead.matched_rules || [],
           skippedDestinations: lead.skipped_destinations || 0,
-          deliveries: deliveries[lead.id] || [],
+          deliveries: (deliveries[lead.id] || []).map((batch) => ({ ...batch, isInbound: true })),
         }));
         setLeads([...incoming, ...mapped].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)));
         setHasMore(inboundHasMore || existingHasMore);
@@ -424,6 +425,21 @@ export function AllLeadsPage() {
     [toast, fetchLeads],
   );
 
+  const handleRetryDelivery = useCallback(async (batch: LeadDelivery) => {
+    if (!isAdmin || !batch.isInbound || retryingBatchId) return;
+    setRetryingBatchId(batch.id);
+    try {
+      const { data, error } = await api.functions.invoke('retry-inbound-delivery', { body: { batch_id: batch.id } });
+      if (error) throw error;
+      toast({ title: 'Retry completed', description: `${batch.universities?.name || 'University'}: ${data.results?.[0]?.status || 'check delivery result'}` });
+      await fetchLeads(true);
+    } catch (error: any) {
+      toast({ title: 'Could not retry this delivery', description: error.message, variant: 'destructive' });
+    } finally {
+      setRetryingBatchId(null);
+    }
+  }, [isAdmin, retryingBatchId, toast, fetchLeads]);
+
   const handleBulkRetry = useCallback(async () => {
     const failedIds = Array.from(selectedIds).filter((id) => leads.find((l) => l.id === id)?.status === "Failed");
     if (failedIds.length === 0) {
@@ -479,6 +495,12 @@ export function AllLeadsPage() {
               <span className={`shrink-0 font-semibold ${color}`}>{result}</span>
             </div>
             {batch.error_message && <p className="mt-1 break-words text-xs text-muted-foreground">{batch.error_message}</p>}
+            {isAdmin && batch.isInbound && result === 'Failed' && <Button type="button" variant="outline" size="sm"
+              className="mt-2 h-8 border-red-200 text-red-700 hover:bg-red-50" disabled={!!retryingBatchId}
+              onClick={() => handleRetryDelivery(batch)}>
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${retryingBatchId === batch.id ? 'animate-spin' : ''}`} />
+              {retryingBatchId === batch.id ? 'Retrying…' : 'Retry this university'}
+            </Button>}
           </div>
         </div>;
       })}

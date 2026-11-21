@@ -1,6 +1,7 @@
 export interface LeadDelivery {
   id: string;
   status: string;
+  isInbound?: boolean;
   success_count?: number;
   duplicate_count?: number;
   fail_count?: number;

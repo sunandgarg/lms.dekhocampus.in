@@ -14,6 +14,40 @@ function leadData(lead) {
   return data;
 }
 
+export async function retryApiConfig(db, lead) {
+  let source = lead;
+  for (let attempt = 0; source && attempt < 4; attempt++) {
+    const [queued] = await db.execute('SELECT task FROM lms_lead_queue WHERE batch_id = ? AND lead_index = ? LIMIT 1',
+      [source.batch_id, Number(source.extra_data?.lead_index) || 0]);
+    if (queued[0]?.task?.apiConfig) return queued[0].task.apiConfig;
+    const parentId = source.extra_data?.retry_of;
+    if (!/^[0-9a-f-]{36}$/i.test(String(parentId || ''))) break;
+    const { data } = await executeRecords(db, { table: 'leads', select: '*', single: true,
+      filters: [{ field: 'id', op: 'eq', value: parentId }] });
+    source = data;
+  }
+  return undefined;
+}
+
+export async function retryInboundDelivery({ db, s3, bucket, batchId, userId }) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(batchId || ''))) {
+    throw Object.assign(new Error('Choose a valid university delivery'), { status: 400 });
+  }
+  const { data: attempts } = await executeRecords(db, { table: 'leads', select: '*',
+    filters: [{ field: 'batch_id', op: 'eq', value: batchId }, { field: 'deleted_at', op: 'is', value: null }], limit: 10 });
+  const failed = attempts.find((lead) => ['Fail', 'failed'].includes(lead.status));
+  const inboundId = failed?.extra_data?.inbound_lead_id;
+  if (!inboundId) throw Object.assign(new Error('No failed incoming lead is available to retry'), { status: 409 });
+  const { data: inbound } = await executeRecords(db, { table: 'inbound_leads', select: 'id,batch_ids', single: true,
+    filters: [{ field: 'id', op: 'eq', value: inboundId }, { field: 'deleted_at', op: 'is', value: null }] });
+  if (!inbound?.batch_ids?.includes(batchId)) {
+    throw Object.assign(new Error('This delivery is not linked to the incoming lead'), { status: 404 });
+  }
+  const result = await retryLeads({ db, s3, bucket, leadIds: [failed.id], userId });
+  if (!result.retried) throw Object.assign(new Error('Retry limit reached or delivery already retried'), { status: 409 });
+  return result;
+}
+
 export async function retryLeads({ db, s3, bucket, leadIds, userId, maxRetries = 3 }) {
   if (!Array.isArray(leadIds) || !leadIds.length || leadIds.length > 100 ||
     leadIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) {
@@ -45,10 +79,21 @@ export async function retryLeads({ db, s3, bucket, leadIds, userId, maxRetries =
         results.push({ lead_id: lead.id, skipped: true });
         continue;
       }
+      const originalConfig = await retryApiConfig(db, lead);
+      const inboundId = lead.extra_data?.inbound_lead_id;
+      if (/^[0-9a-f-]{36}$/i.test(String(inboundId || ''))) {
+        const [linked] = await db.execute(`UPDATE lms_records SET data = JSON_ARRAY_INSERT(data, '$.batch_ids[0]', ?)
+          WHERE collection = 'inbound_leads' AND id = ? AND JSON_TYPE(JSON_EXTRACT(data, '$.batch_ids')) = 'ARRAY'
+          AND JSON_EXTRACT(data, '$.deleted_at') IS NULL
+          AND JSON_CONTAINS(JSON_EXTRACT(data, '$.batch_ids'), JSON_QUOTE(?))`,
+        [batch.id, inboundId, lead.batch_id]);
+        if (!linked.affectedRows) throw new Error('Incoming lead was removed before retry delivery');
+      }
       deliveryStarted = true;
       const result = await processLead({ db, s3, bucket, userId,
         task: { universityId: lead.university_id, batchId: batch.id, sourceLabel: 'Manual Retry',
-          leadData: data, retryCount: Number(lead.retry_count || 0) + 1, retryOf: lead.id } });
+          leadData: data, apiConfig: originalConfig,
+          retryCount: Number(lead.retry_count || 0) + 1, retryOf: lead.id } });
       await db.execute("UPDATE lms_records SET data = JSON_SET(data, '$.status', 'Retried', '$.retry_count', ?) WHERE collection = 'leads' AND id = ?",
         [Number(lead.retry_count || 0) + 1, lead.id]);
       await executeRecords(db, { table: 'upload_batches', action: 'update', filters: [{ field: 'id', op: 'eq', value: batch.id }],
