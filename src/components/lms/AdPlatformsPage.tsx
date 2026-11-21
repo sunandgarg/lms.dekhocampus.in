@@ -811,7 +811,7 @@ export function AdPlatformsPage() {
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">
-              Connect {setupPlatform === 'facebook' ? 'Facebook' : setupPlatform === 'bing' ? 'Microsoft / Bing' : 'Google'} Account
+              Set up {setupPlatform === 'facebook' ? 'Meta' : setupPlatform === 'bing' ? 'Microsoft / Bing' : 'Google Ads'} Webhook
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
@@ -867,7 +867,7 @@ export function AdPlatformsPage() {
             <Button variant="outline" onClick={() => setShowSetup(false)}>Cancel</Button>
             <Button onClick={saveIntegration} disabled={saving}>
               {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
-              Connect Account
+              Create Webhook
             </Button>
           </DialogFooter>
         </DialogContent>
