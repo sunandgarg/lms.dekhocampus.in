@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2 } from "lucide-react";
+import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, AlertCircle, Inbox, Users, ArrowUpRight, X } from "lucide-react";
 import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
@@ -41,6 +41,7 @@ export interface LmsLead {
 }
 
 function formatDate(iso: string) {
+  if (!iso || Number.isNaN(new Date(iso).getTime())) return '-';
   return new Date(iso).toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
@@ -124,6 +125,7 @@ export function AllLeadsPage() {
   const [sortCol, setSortCol] = useState<string>("receivedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showAutomation, setShowAutomation] = useState(false);
 
   const fetchLeads = useCallback(
     async (_forceRefresh = false) => {
@@ -229,7 +231,7 @@ export function AllLeadsPage() {
   }, [detailLead]);
 
   const filtered = useMemo(() => {
-    let result = leads.filter((l) => {
+    const result = leads.filter((l) => {
       const q = search.toLowerCase();
       if (q && !l.name.toLowerCase().includes(q) && !l.email.toLowerCase().includes(q) && !l.mobile.includes(q))
         return false;
@@ -283,7 +285,8 @@ export function AllLeadsPage() {
     }
     const total = leads.length;
     const attempted = pushed + failed + duplicate;
-    return { total, pushed, failed, pending, duplicate, rate: attempted ? ((pushed / attempted) * 100).toFixed(1) : "0" };
+    return { total, pushed, failed, pending, duplicate, received: leads.filter((lead) => lead.status === 'Received').length,
+      rate: attempted ? ((pushed / attempted) * 100).toFixed(1) : "0" };
   }, [leads]);
 
   const sources = useMemo(() => [...new Set(leads.map((l) => l.source).filter(Boolean))], [leads]);
@@ -301,14 +304,19 @@ export function AllLeadsPage() {
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
       return n;
     });
   };
 
   const toggleAll = () => {
-    if (selectedIds.size === filtered.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(filtered.map((l) => l.id)));
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (filtered.every((lead) => next.has(lead.id))) filtered.forEach((lead) => next.delete(lead.id));
+      else filtered.forEach((lead) => next.add(lead.id));
+      return next;
+    });
   };
 
   const handleRetryLead = useCallback(
@@ -364,347 +372,194 @@ export function AllLeadsPage() {
 
   const kpiClick = (status: string) => setStatusFilter(status === statusFilter ? "all" : status);
 
+  const clearFilters = () => {
+    setSearch(''); setStatusFilter('all'); setSourceFilter('all'); setCampaignFilter('');
+    setUniversityFilter('all'); setCityFilter('all');
+  };
+  const activeFilterCount = [statusFilter !== 'all', sourceFilter !== 'all', !!campaignFilter,
+    universityFilter !== 'all', cityFilter !== 'all'].filter(Boolean).length;
+  const detailField = (_lead: LmsLead, label: string, value: unknown) => (
+    <div className="min-w-0" key={label}>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 break-words text-sm font-medium">{value == null || value === '' || value === '-' ? 'Not provided' : String(value)}</dd>
+    </div>
+  );
+  const sortHeader = (label: string, col: string) => (
+    <TableHead aria-sort={sortCol === col ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="inline-flex items-center gap-1 rounded py-2 text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => toggleSort(col)}>{label}<SortIcon col={col} /></button>
+    </TableHead>
+  );
+
   return (
-    <div className="container mx-auto px-4 py-6 space-y-4">
-      <DataRetentionNotice variant="banner" className="mb-2" />
-
-      <LeadAutomationSettings />
-
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto max-w-[1600px] px-4 py-6 space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-display font-bold text-foreground">All Leads</h1>
-          <p className="text-xs text-muted-foreground">
-            Shows incoming leads from generic APIs, campaigns, and external sources. CSV upload leads appear in Upload History.
-          </p>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary"><Inbox className="h-4 w-4" /> Lead workspace</div>
+          <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">All Leads</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Review incoming enquiries, see each submission and its delivery, and follow up with the right student. File uploads remain in Upload History.</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => fetchLeads(true)} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} /> Refresh
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowAutomation(!showAutomation)} aria-expanded={showAutomation}>
+            <Zap className="mr-2 h-4 w-4" /> Automation {showAutomation ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => fetchLeads(true)} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </Button>
+        </div>
       </div>
 
-      {/* KPI Strip */}
-      <div className="flex flex-wrap gap-2">
+      {showAutomation && <LeadAutomationSettings />}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
-          { label: "Total", value: stats.total, filter: "all", color: "bg-primary/10 text-primary" },
-          { label: "Pushed", value: stats.pushed, filter: "Pushed", color: "bg-success/10 text-success" },
-          { label: "Duplicate", value: stats.duplicate, filter: "Duplicate", color: "bg-amber-500/10 text-amber-600" },
-          { label: "Failed", value: stats.failed, filter: "Failed", color: "bg-destructive/10 text-destructive" },
-          { label: "Pending", value: stats.pending, filter: "Pending", color: "bg-warning/10 text-warning" },
-          { label: "Received", value: leads.filter((lead) => lead.status === 'Received').length, filter: "Received", color: "bg-primary/10 text-primary" },
-          { label: "Push Rate", value: `${stats.rate}%`, filter: "", color: "bg-primary/10 text-primary" },
-        ].map((k) => (
-          <button
-            key={k.label}
-            onClick={() => k.filter && kpiClick(k.filter)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${k.color} hover:opacity-80`}
-          >
-            {k.label}: <span className="font-bold font-display">{k.value}</span>
-          </button>
-        ))}
+          { label: 'Submissions loaded', value: stats.total, note: hasMore ? 'Older records available' : 'All loaded records', icon: Inbox, filter: 'all', tone: 'text-primary bg-primary/10' },
+          { label: 'Unique contacts', value: new Set(leads.map((lead) => {
+            const email = lead.email.trim().toLowerCase(); const mobile = lead.mobile.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+            return email && mobile ? `${email}|${mobile}` : lead.id;
+          })).size, note: 'Email and phone match', icon: Users, filter: '', tone: 'text-blue-600 bg-blue-500/10' },
+          { label: 'Received', value: stats.received, note: 'Incoming lead records', icon: Inbox, filter: 'Received', tone: 'text-sky-700 bg-sky-500/10' },
+          { label: 'Failed pushes', value: stats.failed, note: 'May need retry', icon: AlertCircle, filter: 'Failed', tone: 'text-destructive bg-destructive/10' },
+          { label: 'Pushed', value: stats.pushed, note: `${stats.rate}% of attempted deliveries`, icon: ArrowUpRight, filter: 'Pushed', tone: 'text-emerald-700 bg-emerald-500/10' },
+        ].map((item) => <button key={item.label} type="button" onClick={() => item.filter && kpiClick(item.filter)}
+          className={`rounded-xl border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${item.filter && statusFilter === item.filter ? 'border-primary' : 'border-border'}`}>
+          <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-muted-foreground">{item.label}</span><span className={`rounded-lg p-1.5 ${item.tone}`}><item.icon className="h-4 w-4" /></span></div>
+          <div className="mt-3 text-2xl font-display font-bold tabular-nums">{item.value}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{item.note}</div>
+        </button>)}
       </div>
 
-      {/* Search + Filter Toggle */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search name, email, mobile..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-        <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)}>
-          <Filter className="h-4 w-4 mr-1" /> Filters{" "}
-          {showFilters ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />}
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => downloadCSV(filtered, "all-leads.csv")}>
-          <Download className="h-4 w-4 mr-1" /> All CSV
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            downloadCSV(
-              leads.filter((l) => l.status === "Failed"),
-              "failed-leads.csv",
-            )
-          }
-        >
-          <Download className="h-4 w-4 mr-1" /> Failed CSV
-        </Button>
-      </div>
-
-      {/* Collapsible Filters */}
-      {showFilters && (
-        <Card className="p-4 grid grid-cols-2 md:grid-cols-5 gap-3 animate-fade-in">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="Pushed">Pushed</SelectItem>
-              <SelectItem value="Duplicate">Duplicate</SelectItem>
-              <SelectItem value="Failed">Failed</SelectItem>
-              <SelectItem value="Pending">Pending</SelectItem>
-              <SelectItem value="Received">Received</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={sourceFilter} onValueChange={setSourceFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="Source" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Sources</SelectItem>
-              {sources.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={universityFilter} onValueChange={setUniversityFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="University" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Universities</SelectItem>
-              {universities.map((u) => (
-                <SelectItem key={u} value={u}>
-                  {u}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={cityFilter} onValueChange={setCityFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="City" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Cities</SelectItem>
-              {cities.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input
-            placeholder="Campaign name..."
-            value={campaignFilter}
-            onChange={(e) => setCampaignFilter(e.target.value)}
-          />
-        </Card>
-      )}
-
-      {/* Bulk Actions */}
-      {selectedIds.size > 0 && (
-        <div className="flex gap-2 items-center p-3 bg-primary/5 border border-primary/20 rounded-lg animate-fade-in">
-          <span className="text-sm font-medium">{selectedIds.size} selected</span>
-          <Button size="sm" onClick={handleBulkRetry}>
-            <RefreshCw className="h-3 w-3 mr-1" /> Retry Failed
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              downloadCSV(
-                leads.filter((l) => selectedIds.has(l.id)),
-                "selected-leads.csv",
-              )
-            }
-          >
-            <Download className="h-3 w-3 mr-1" /> Export
-          </Button>
-        </div>
-      )}
-
-      {/* Table */}
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-muted-foreground">Loading leads...</span>
+      <Card className="overflow-hidden shadow-sm">
+        <div className="space-y-3 border-b p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div><h2 className="font-semibold">Lead inbox</h2><p className="text-xs text-muted-foreground">{filtered.length} matching submissions · {grouped.length} contacts shown{hasMore ? ' · load older leads for more' : ''}</p></div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} aria-expanded={showFilters}>
+                <Filter className="mr-2 h-4 w-4" /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => downloadCSV(filtered, 'lead-inbox-view.csv')} disabled={!filtered.length}>
+                <Download className="mr-2 h-4 w-4" /> Export view ({filtered.length})
+              </Button>
             </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="table-header">
-                  <TableHead className="w-10">
-                    <Checkbox
-                      checked={selectedIds.size === filtered.length && filtered.length > 0}
-                      onCheckedChange={toggleAll}
-                    />
-                  </TableHead>
-                  <TableHead>History</TableHead>
-                  <TableHead className="cursor-pointer" onClick={() => toggleSort("name")}>
-                    Name <SortIcon col="name" />
-                  </TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Mobile</TableHead>
-                  <TableHead className="cursor-pointer" onClick={() => toggleSort("source")}>
-                    Source <SortIcon col="source" />
-                  </TableHead>
-                  <TableHead>Campaign</TableHead>
-                  <TableHead>City</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>UTM source</TableHead>
-                  <TableHead>UTM medium</TableHead>
-                  <TableHead>UTM campaign</TableHead>
-                  <TableHead>Course / interest</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Device</TableHead>
-                  <TableHead>Mode</TableHead>
-                  <TableHead>OTP verified</TableHead>
-                  <TableHead>Consent</TableHead>
-                  <TableHead>Campus</TableHead>
-                  <TableHead>Exam</TableHead>
-                  <TableHead>CTA source</TableHead>
-                  <TableHead>Landing page</TableHead>
-                  <TableHead>Page</TableHead>
-                  <TableHead>Last query</TableHead>
-                  <TableHead>First instance date</TableHead>
-                  <TableHead>Date of registration</TableHead>
-                  <TableHead>University</TableHead>
-                  <TableHead className="cursor-pointer" onClick={() => toggleSort("status")}>
-                    Status <SortIcon col="status" />
-                  </TableHead>
-                  <TableHead>Fail Reason</TableHead>
-                  <TableHead className="cursor-pointer" onClick={() => toggleSort("receivedAt")}>
-                    Received <SortIcon col="receivedAt" />
-                  </TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={31} className="text-center py-12 text-muted-foreground">
-                      No leads found. Incoming generic API and campaign leads will appear here.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  grouped.flatMap(({ key, items, latest, firstAt }) => {
-                    const shown = expanded.has(key) ? items : [latest];
-                    return shown.map((lead, index) => (
-                    <TableRow key={lead.id} className="group hover:bg-muted/30">
-                      <TableCell>
-                        <Checkbox checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} />
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{index === 0 && items.length > 1 && <Button size="sm" variant="outline" onClick={() => setExpanded((current) => {
-                        const next = new Set(current); next.has(key) ? next.delete(key) : next.add(key); return next;
-                      })}>{expanded.has(key) ? <ChevronUp className="h-3 w-3 mr-1" /> : <ChevronDown className="h-3 w-3 mr-1" />}{items.length} submissions</Button>}</TableCell>
-                      <TableCell className="font-medium">{lead.name}</TableCell>
-                      <TableCell className="text-sm">{lead.email}</TableCell>
-                      <TableCell className="font-mono text-sm">{lead.mobile}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
-                          {lead.source}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{lead.campaign || "-"}</TableCell>
-                      <TableCell className="text-sm">{lead.city || "-"}</TableCell>
-                      <TableCell>{field(lead, 'state')}</TableCell>
-                      <TableCell>{field(lead, 'utm_source', 'utmSource')}</TableCell>
-                      <TableCell>{field(lead, 'utm_medium', 'utmMedium')}</TableCell>
-                      <TableCell>{field(lead, 'utm_campaign', 'utmCampaign') !== '-' ? field(lead, 'utm_campaign', 'utmCampaign') : lead.campaign || '-'}</TableCell>
-                      <TableCell>{lead.course || field(lead, 'interest', 'program')}</TableCell>
-                      <TableCell>{field(lead, 'category')}</TableCell>
-                      <TableCell>{field(lead, 'device')}</TableCell>
-                      <TableCell>{field(lead, 'mode')}</TableCell>
-                      <TableCell>{field(lead, 'otp_verified', 'otpVerified')}</TableCell>
-                      <TableCell>{field(lead, 'consent')}</TableCell>
-                      <TableCell>{field(lead, 'campus')}</TableCell>
-                      <TableCell>{field(lead, 'exam')}</TableCell>
-                      <TableCell>{field(lead, 'cta_source', 'ctaSource')}</TableCell>
-                      <TableCell className="max-w-52 truncate">{field(lead, 'landing_page', 'landingPage')}</TableCell>
-                      <TableCell className="max-w-52 truncate">{field(lead, 'page', 'page_url', 'pageUrl')}</TableCell>
-                      <TableCell>{field(lead, 'last_query', 'lastQuery')}</TableCell>
-                      <TableCell className="whitespace-nowrap">{formatDate(firstAt)}</TableCell>
-                      <TableCell className="whitespace-nowrap">{field(lead, 'date_of_registration', 'registration_date') !== '-' ? field(lead, 'date_of_registration', 'registration_date') : formatDate(firstAt)}</TableCell>
-                      <TableCell className="text-sm font-medium">{lead.university}</TableCell>
-                      <TableCell>{statusBadge(lead.status)}</TableCell>
-                      <TableCell className="text-xs text-destructive max-w-[150px] truncate">
-                        {lead.failReason ? lead.failReason.slice(0, 50) : "-"}
-                      </TableCell>
-                      <TableCell className="text-xs">{formatDate(lead.receivedAt)}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => setDetailLead(lead)}
-                            title="View Details"
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                          </Button>
-                          {lead.isInbound && <Button asChild variant="ghost" size="icon" className="h-7 w-7" title="Download original payload ZIP">
-                            <a href={`/api/inbound/generic-leads/${lead.id}/archive.zip`}><Download className="h-3.5 w-3.5" /></a>
-                          </Button>}
-                          {lead.status === "Failed" && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => handleRetryLead(lead)}
-                              title="Retry"
-                            >
-                              <RefreshCw className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ));
-                  })
-                )}
-              </TableBody>
-            </Table>
-          )}
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input aria-label="Search leads" placeholder="Search name, email or mobile" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+            </div>
+            <div className="flex flex-wrap gap-1" aria-label="Filter by delivery status">
+              {[['all','All'],['Received','Received'],['Failed','Needs attention'],['Pushed','Pushed']].map(([value,label]) =>
+                <Button key={value} size="sm" variant={statusFilter === value ? 'default' : 'ghost'} onClick={() => setStatusFilter(value)}>{label}</Button>)}
+            </div>
+          </div>
+          {showFilters && <div className="grid gap-2 rounded-lg bg-muted/40 p-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger aria-label="Status filter"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent>
+              {['all','Received','Pending','Pushed','Duplicate','Failed','Needs review'].map((value) => <SelectItem key={value} value={value}>{value === 'all' ? 'All statuses' : value}</SelectItem>)}
+            </SelectContent></Select>
+            <Select value={sourceFilter} onValueChange={setSourceFilter}><SelectTrigger aria-label="Source filter"><SelectValue placeholder="Source" /></SelectTrigger><SelectContent><SelectItem value="all">All sources</SelectItem>{sources.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+            <Select value={universityFilter} onValueChange={setUniversityFilter}><SelectTrigger aria-label="Destination filter"><SelectValue placeholder="Destination" /></SelectTrigger><SelectContent><SelectItem value="all">All destinations</SelectItem>{universities.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+            <Select value={cityFilter} onValueChange={setCityFilter}><SelectTrigger aria-label="City filter"><SelectValue placeholder="City" /></SelectTrigger><SelectContent><SelectItem value="all">All cities</SelectItem>{cities.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+            <Input aria-label="Campaign filter" placeholder="Campaign contains..." value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)} />
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="justify-start lg:col-span-5"><X className="mr-2 h-4 w-4" /> Clear filters</Button>
+          </div>}
+        </div>
+
+        {selectedIds.size > 0 && <div className="flex flex-wrap items-center gap-2 border-b bg-primary/5 px-4 py-2 text-sm">
+          <strong>{selectedIds.size} selected</strong>
+          <Button size="sm" variant="outline" onClick={handleBulkRetry}><RefreshCw className="mr-1 h-3.5 w-3.5" /> Retry failed</Button>
+          <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), 'selected-leads.csv')}><Download className="mr-1 h-3.5 w-3.5" /> Export selected</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button>
+        </div>}
+
+        <div className="overflow-x-auto">
+          {loading ? <div className="flex items-center justify-center py-16 text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading leads...</div> :
+          <Table className="min-w-[1050px]">
+            <TableHeader><TableRow className="table-header">
+              <TableHead className="w-10"><Checkbox aria-label="Select all matching submissions" checked={filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>
+              {sortHeader('Latest activity','receivedAt')}
+              {sortHeader('Student','name')}
+              <TableHead>Study interest</TableHead>
+              {sortHeader('Source','source')}
+              <TableHead>Location</TableHead>
+              <TableHead>Destination / delivery</TableHead>
+              <TableHead className="w-24">History</TableHead>
+              <TableHead className="w-28 text-right">Actions</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {grouped.length === 0 ? <TableRow><TableCell colSpan={9} className="py-16 text-center text-muted-foreground">
+                <Inbox className="mx-auto mb-3 h-8 w-8 opacity-40" /><p className="font-medium text-foreground">No matching leads</p><p className="mt-1 text-sm">Try another filter or refresh to check new enquiries.</p>
+              </TableCell></TableRow> : grouped.flatMap(({ key, items, latest, firstAt }) =>
+                (expanded.has(key) ? items : [latest]).map((lead, index) => <TableRow key={lead.id} className={index > 0 ? 'bg-muted/20' : 'hover:bg-muted/30'}>
+                  <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>
+                  <TableCell className="whitespace-nowrap align-top"><div className="text-sm font-medium tabular-nums">{formatDate(lead.receivedAt)}</div><div className="mt-1 text-xs text-muted-foreground">{index > 0 ? 'Earlier submission' : 'Most recent'}</div></TableCell>
+                  <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button>
+                    <div className="mt-1 max-w-[230px] truncate text-xs text-muted-foreground" title={lead.email}>{lead.email || 'No email'}</div><div className="text-xs text-muted-foreground">{lead.mobile || 'No mobile'}</div></TableCell>
+                  <TableCell className="align-top"><div className="max-w-[180px] truncate text-sm font-medium" title={lead.course || field(lead,'interest','program')}>{lead.course || field(lead,'interest','program')}</div><div className="mt-1 text-xs text-muted-foreground">{field(lead,'campus') !== '-' ? field(lead,'campus') : field(lead,'exam')}</div></TableCell>
+                  <TableCell className="align-top"><Badge variant="outline" className="max-w-[150px] truncate">{lead.source || 'Unknown'}</Badge><div className="mt-1 max-w-[170px] truncate text-xs text-muted-foreground" title={lead.campaign}>{lead.campaign || field(lead,'utm_campaign','utmCampaign')}</div></TableCell>
+                  <TableCell className="align-top text-sm">{[lead.city,field(lead,'state')].filter((value) => value && value !== '-').join(', ') || '-'}</TableCell>
+                  <TableCell className="align-top"><div className="flex flex-wrap items-center gap-2">{statusBadge(lead.status)}<span className="max-w-[170px] truncate text-xs text-muted-foreground" title={lead.university}>{lead.university}</span></div>
+                    {lead.failReason && <p className="mt-1 max-w-[240px] truncate text-xs text-destructive" title={lead.failReason}>{lead.failReason}</p>}</TableCell>
+                  <TableCell className="align-top">{index === 0 && items.length > 1 ? <button type="button" aria-expanded={expanded.has(key)} aria-label={`${expanded.has(key) ? 'Collapse' : 'Expand'} ${items.length} submissions for ${lead.name || 'this contact'}`}
+                    className="inline-flex min-h-9 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>
+                    {expanded.has(key) ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}{items.length} entries</button> : index === 0 ? <span className="text-xs text-muted-foreground">First seen {formatDate(firstAt)}</span> : <span className="text-xs text-muted-foreground">History</span>}</TableCell>
+                  <TableCell className="align-top"><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`View details for ${lead.name || 'lead'}`} onClick={() => setDetailLead(lead)}><Eye className="h-4 w-4" /></Button>
+                    {lead.status === 'Failed' && <Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`Retry ${lead.name || 'lead'}`} onClick={() => handleRetryLead(lead)}><RefreshCw className="h-4 w-4" /></Button>}</div></TableCell>
+                </TableRow>))}
+            </TableBody>
+          </Table>}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground">
+          <span>Showing {grouped.length} contacts from {filtered.length} loaded submissions. Same email and mobile are grouped; matching submissions remain available.</span>
+          <span>Export includes the current loaded view.</span>
         </div>
       </Card>
-
-      {hasMore && <div className="text-center"><Button variant="outline" onClick={() => setPageCount((count) => count + 1)} disabled={loading}>
-        Load older leads
-      </Button></div>}
+      {hasMore && <div className="text-center"><Button variant="outline" onClick={() => setPageCount((count) => count + 1)} disabled={loading}>Load older leads</Button></div>}
+      <DataRetentionNotice variant="inline" />
 
       {/* Lead Detail Drawer */}
       <Sheet open={!!detailLead} onOpenChange={() => setDetailLead(null)}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
           {detailLead && (
             <>
               <SheetHeader>
-                <SheetTitle className="font-display">{detailLead.name}</SheetTitle>
+                <SheetTitle className="font-display text-xl">{detailLead.name || 'Unnamed lead'}</SheetTitle>
               </SheetHeader>
-              <div className="mt-6 space-y-4">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {[
-                    ["Email", detailLead.email],
-                    ["Mobile", detailLead.mobile],
-                    ["City", detailLead.city || "-"],
-                    ["Course", detailLead.course || "-"],
-                    ["Specialization", detailLead.specialization || "-"],
-                    ["Source", detailLead.source],
-                    ["Campaign", detailLead.campaign || "-"],
-                    ["University", detailLead.university],
-                    ["Status", detailLead.status],
-                    ["Retry Count", String(detailLead.retryCount)],
-                  ].map(([k, v]) => (
-                    <div key={k}>
-                      <span className="text-muted-foreground text-xs">{k}</span>
-                      <p className="font-medium">{v}</p>
-                    </div>
-                  ))}
-                </div>
+              <div className="mt-5 space-y-6 pb-6">
+                <div className="flex flex-wrap items-center gap-2">{statusBadge(detailLead.status)}<span className="text-xs text-muted-foreground">Received {formatDate(detailLead.receivedAt)}</span></div>
+                <section className="space-y-3"><h3 className="border-b pb-2 text-sm font-semibold">Student and contact</h3>
+                  <dl className="grid grid-cols-2 gap-3">{[
+                    ['Email', detailLead.email], ['Mobile', detailLead.mobile], ['City', detailLead.city], ['State', field(detailLead,'state')],
+                    ['Course / interest', detailLead.course || field(detailLead,'interest','program')], ['Specialization', detailLead.specialization],
+                    ['Campus', field(detailLead,'campus')], ['Exam', field(detailLead,'exam')], ['Mode', field(detailLead,'mode')], ['Category', field(detailLead,'category')],
+                  ].map(([label,value]) => detailField(detailLead,label,value))}</dl>
+                </section>
+                <section className="space-y-3"><h3 className="border-b pb-2 text-sm font-semibold">Source and campaign</h3>
+                  <dl className="grid grid-cols-2 gap-3">{[
+                    ['Source',detailLead.source],['Connection',detailLead.triggerSource],['Campaign',detailLead.campaign],
+                    ['UTM source',field(detailLead,'utm_source','utmSource')],['UTM medium',field(detailLead,'utm_medium','utmMedium')],
+                    ['UTM campaign',field(detailLead,'utm_campaign','utmCampaign')],['CTA source',field(detailLead,'cta_source','ctaSource')],
+                    ['Landing page',field(detailLead,'landing_page','landingPage')],['Page',field(detailLead,'page','page_url','pageUrl')],
+                    ['Last query',field(detailLead,'last_query','lastQuery')],['Device',field(detailLead,'device')],
+                  ].map(([label,value]) => detailField(detailLead,label,value))}</dl>
+                </section>
+                <section className="space-y-3"><h3 className="border-b pb-2 text-sm font-semibold">Verification and consent</h3>
+                  <p className="text-xs text-muted-foreground">These values are reported by the source. “Not provided” means no evidence was included with this submission.</p>
+                  <dl className="grid grid-cols-2 gap-3">{[
+                    ['Consent',field(detailLead,'consent')],['OTP verified',field(detailLead,'otp_verified','otpVerified')],
+                    ['Registration date',formatDate(field(detailLead,'date_of_registration','registration_date'))],
+                    ['First instance date',formatDate(field(detailLead,'first_instance_date','firstInstanceDate'))],
+                  ].map(([label,value]) => detailField(detailLead,label,value === '-' ? '' : value))}</dl>
+                </section>
+                <section className="space-y-3"><h3 className="border-b pb-2 text-sm font-semibold">Delivery</h3>
+                  <dl className="grid grid-cols-2 gap-3">{[
+                    ['Destination',detailLead.university],['Status',detailLead.status],['Retry count',detailLead.retryCount],
+                  ].map(([label,value]) => detailField(detailLead,label,value))}</dl>
                 {detailLead.failReason && (
                   <div className="p-3 bg-destructive/10 rounded-lg text-sm text-destructive">
                     <strong>API Response:</strong>
                     <pre className="mt-1 text-xs overflow-x-auto whitespace-pre-wrap">{detailLead.apiResponse}</pre>
                   </div>
                 )}
+                </section>
 
                 {detailLead.isInbound && <div className="space-y-2 border-t pt-4">
                   <Button asChild variant="outline" size="sm"><a href={`/api/inbound/generic-leads/${detailLead.id}/archive.zip`}>
@@ -719,12 +574,12 @@ export function AllLeadsPage() {
                       <span className="font-medium">{batch.universities?.name || 'University'}</span>: {batch.status}
                       {batch.error_message && <p className="text-xs text-destructive">{batch.error_message}</p>}
                     </div>)}
-                  {detailLead.extraData && Object.keys(detailLead.extraData).length > 0 && <div className="pt-2">
-                    <p className="text-sm font-medium">Incoming fields</p>
-                    <div className="text-xs break-all">{Object.entries(detailLead.extraData).map(([field, value]) =>
-                      <p key={field}><strong>{field}:</strong> {String(value)}</p>)}</div>
-                  </div>}
                 </div>}
+
+                {detailLead.extraData && Object.keys(detailLead.extraData).length > 0 && <section className="space-y-3 border-t pt-4">
+                  <h3 className="text-sm font-semibold">All incoming fields</h3>
+                  <dl className="grid grid-cols-2 gap-3">{Object.entries(detailLead.extraData).map(([label,value]) => detailField(detailLead,label,value))}</dl>
+                </section>}
 
                 {detailLead.status === "Failed" && (
                   <Button
