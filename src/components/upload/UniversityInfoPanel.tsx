@@ -282,8 +282,8 @@ export function UniversityInfoPanel({ university, onRateLimitUpdate }: Universit
           <p className="text-xs text-foreground">
             <span className="font-medium">How it works:</span> At{" "}
             <span className="font-bold text-primary">{leadsPerMinute} leads/min</span>, 200 leads complete in ~
-            <span className="font-bold text-primary">{Math.ceil(200 / leadsPerMinute)} min</span>. Rate is enforced both
-            in live processing and background queue.
+            <span className="font-bold text-primary">{Math.ceil(200 / leadsPerMinute)} min</span>. This is the default
+            for new runs; choose the rate for each push before it starts.
           </p>
         </div>
 

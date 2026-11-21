@@ -134,7 +134,7 @@ function QueueMonitorInner() {
     return {
       activeBatches: batches.filter(
         (b) =>
-          (b.status === "processing" || b.status === "pending" || b.status === "paused" || b.is_paused) &&
+          (b.status === "processing" || b.status === "pending" || b.status === "paused" || b.status === "scheduled" || b.is_paused) &&
           b.created_at > twentyFourHoursAgo &&
           !b.is_cancelled,
       ),
@@ -152,7 +152,7 @@ function QueueMonitorInner() {
   const currentList = activeTab === "active" ? activeBatches : activeTab === "failed" ? failedBatches : successBatches;
 
   const getProgress = (b: BatchInfo) =>
-    b.total_leads === 0 ? 0 : Math.round(((b.success_count + b.fail_count + ((b as any).duplicate_count || 0)) / b.total_leads) * 100);
+    !b.total_leads ? 0 : Math.round(((Number(b.success_count || 0) + Number(b.fail_count || 0) + Number(b.duplicate_count || 0)) / b.total_leads) * 100);
 
   const updateBatch = useCallback(
     async (batchId: string, action: 'pause' | 'continue' | 'stop', successTitle: string) => {
@@ -288,6 +288,8 @@ function QueueMonitorInner() {
                       <Badge variant="outline" className="text-[10px] px-1.5">
                         Paused
                       </Badge>
+                    ) : batch.status === "scheduled" ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5">Scheduled</Badge>
                     ) : batch.status === "processing" ? (
                       <Badge className="text-[10px] px-1.5 bg-blue-500/15 text-blue-600 border-blue-200">
                         Processing
@@ -320,7 +322,7 @@ function QueueMonitorInner() {
                       {stringifyBatchValue(batch.university_name)} · {formatDistanceToNow(new Date(batch.created_at), { addSuffix: true })}
                     </span>
                     <span>
-                      {batch.success_count + batch.fail_count + (batch.duplicate_count || 0)}/{batch.total_leads}
+                      {Number(batch.success_count || 0) + Number(batch.fail_count || 0) + Number(batch.duplicate_count || 0)}/{batch.total_leads}
                     </span>
                   </div>
 
@@ -346,7 +348,7 @@ function QueueMonitorInner() {
                   </div>
                   <div className="flex items-center justify-end gap-1.5 mt-2">
                     {canControl && (
-                      batch.is_paused ? (
+                      batch.status === 'scheduled' ? null : batch.is_paused ? (
                         <Button
                           type="button"
                           variant="outline"

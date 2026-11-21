@@ -21,7 +21,7 @@ import { handleAdWebhook, verifyMeta } from './ad-webhooks.mjs';
 import { receiveEmailEvents } from './email-webhook.mjs';
 import { authorizeShortApi, shortAnalytics, shorten } from './short-api.mjs';
 import { retryLeads, runAutoRetries } from './retry.mjs';
-import { enqueueLeads, sealQueue, workQueue, recoverQueue, controlBatch } from './queue.mjs';
+import { enqueueLeads, sealQueue, workQueue, recoverQueue, controlBatch, activateScheduledBatches } from './queue.mjs';
 import { Readable } from 'node:stream';
 import { isIP } from 'node:net';
 
@@ -402,13 +402,20 @@ export async function start() {
   const retryTimer = setInterval(() => runAutoRetries({ db, s3, bucket: process.env.ARCHIVE_BUCKET })
     .catch((error) => console.error('Automatic retry scan failed:', error)), 60_000);
   let queueBusy = false;
+  let lastScheduleScan = 0;
   const queueTimer = setInterval(async () => {
     if (queueBusy) return;
     queueBusy = true;
-    try { await workQueue({ db, s3, bucket: process.env.ARCHIVE_BUCKET }); }
+    try {
+      if (Date.now() - lastScheduleScan >= 5000) {
+        lastScheduleScan = Date.now();
+        await activateScheduledBatches(db);
+      }
+      await workQueue({ db, s3, bucket: process.env.ARCHIVE_BUCKET });
+    }
     catch (error) { console.error('Lead queue worker failed:', error); }
     finally { queueBusy = false; }
-  }, 1000);
+  }, 500);
   server.on('close', () => { clearInterval(retryTimer); clearInterval(queueTimer); db.end(); });
   return server;
 }

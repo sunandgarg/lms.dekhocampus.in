@@ -14,8 +14,6 @@ import {
   Search,
   FileDown,
   CalendarClock,
-  Lock,
-  Unlock,
   Trash2,
 } from "lucide-react";
 import { parseCSV, generateSampleCSV } from "@/utils/csvParser";
@@ -550,13 +548,9 @@ export function UploadLeadsTab({
   const batchId = persistedState.batchId;
 
   const [isProcessing, setIsProcessing] = useState(Boolean(persistedProcessing.isProcessing && persistedState.batchId));
-  // Per-run only: intentionally not included in upload persistence or university settings.
-  const [pushConcurrency, setPushConcurrency] = useState(2);
-  const [isConcurrencyUnlocked, setIsConcurrencyUnlocked] = useState(false);
-  const [showConcurrencyPin, setShowConcurrencyPin] = useState(false);
-  const [concurrencyPin, setConcurrencyPin] = useState("");
-  const [concurrencyPinError, setConcurrencyPinError] = useState("");
   const [isPaused, setIsPaused] = useState(Boolean(persistedProcessing.isPaused));
+  const [batchStatus, setBatchStatus] = useState('');
+  const [batchRate, setBatchRate] = useState(() => clampUniversityNumber(selectedUniversity?.leads_per_minute, 60, 1, 100));
   const [safetyPauseReason, setSafetyPauseReason] = useState("");
   const [discussionWith, setDiscussionWith] = useState("");
   const [isBackgroundPolling, setIsBackgroundPolling] = useState(Boolean(persistedProcessing.isProcessing && persistedState.batchId));
@@ -608,17 +602,6 @@ export function UploadLeadsTab({
   useEffect(() => {
     pausedRef.current = isPaused;
   }, [isPaused]);
-
-  useEffect(() => {
-    if (!selectedUniversity?.id) {
-      setPushConcurrency(2);
-      setIsConcurrencyUnlocked(false);
-      return;
-    }
-
-    setPushConcurrency(Math.min(5, Math.max(1, selectedUniversity.default_push_concurrency || 2)));
-    setIsConcurrencyUnlocked(false);
-  }, [selectedUniversity?.id, selectedUniversity?.default_push_concurrency]);
 
   // The parent refreshes university records after add/edit. Previously this
   // component kept the old object when its id was unchanged, so a saved
@@ -699,6 +682,7 @@ export function UploadLeadsTab({
     if (!batch) return;
 
       setIsPaused(Boolean(batch.is_paused));
+      setBatchStatus(batch.status || '');
       setSafetyPauseReason(batch.safety_pause_reason || "");
 
       const processed = (batch.success_count ?? 0) + (batch.duplicate_count ?? 0) + (batch.fail_count ?? 0);
@@ -1333,6 +1317,7 @@ export function UploadLeadsTab({
   const handleUniversityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const uni = safeUniversities.find((u) => u.id === e.target.value);
     setSelectedUniversityState(uni || null);
+    setBatchRate(clampUniversityNumber(uni?.leads_per_minute, 60, 1, 100));
     persistence.setState({ selectedUniversityId: uni?.id || null });
     if (uni && onSelectUniversity) {
       onSelectUniversity(uni);
@@ -1343,6 +1328,7 @@ export function UploadLeadsTab({
   const handleRateLimitUpdate = (newRate: number) => {
     if (selectedUniversity) {
       setSelectedUniversityState({ ...selectedUniversity, leads_per_minute: newRate });
+      setBatchRate(clampUniversityNumber(newRate, 60, 1, 100));
     }
   };
 
@@ -1826,7 +1812,7 @@ export function UploadLeadsTab({
     URL.revokeObjectURL(url);
   };
 
-  const createBatch = async (status: string = "uploading") => {
+  const createBatch = async (status: string = "uploading", scheduledAt?: Date) => {
     if (!selectedUniversity?.detailsLoaded) return null;
 
     // Don't save CSV data to reduce storage usage
@@ -1843,6 +1829,8 @@ export function UploadLeadsTab({
         processed_count: 0,
         current_lead_index: 0,
         source_label: sourceLabel.trim() || null,
+        scheduled_at: scheduledAt?.toISOString() || null,
+        leads_per_minute: batchRate,
       })
       .select()
       .single();
@@ -1852,7 +1840,7 @@ export function UploadLeadsTab({
   };
 
   // Save the source and queue first; the server continues delivery if this tab closes.
-  const startBackgroundProcessing = async () => {
+  const startBackgroundProcessing = async (scheduledAt?: Date) => {
     if (!selectedUniversity?.detailsLoaded || leads.length === 0) return;
 
     processingRef.current = true;
@@ -1861,12 +1849,12 @@ export function UploadLeadsTab({
     setStartTime(Date.now());
     setAlert({
       type: "info",
-      message: `Processing ${leads.length} leads (${pushConcurrency} at a time)...`,
+      message: `Saving ${leads.length} leads to the server in groups of 100. Keep this page open until queued.`,
     });
 
     let newBatchId: string | null = null;
     try {
-      newBatchId = await createBatch("uploading");
+      newBatchId = await createBatch("uploading", scheduledAt);
       if (!newBatchId) {
         setAlert({ type: "error", message: "Failed to create batch" });
         setIsProcessing(false);
@@ -1919,8 +1907,12 @@ export function UploadLeadsTab({
         body: JSON.stringify({ finalize: true }),
       });
       if (!final.ok) throw new Error('Could not confirm the server queue. Check Upload History before retrying.');
+      const sealed = await final.json();
+      setBatchStatus(sealed.status);
       setIsBackgroundPolling(true);
-      setAlert({ type: 'info', message: `Queued ${leads.length} leads. Processing will continue if you close this page.` });
+      setAlert({ type: 'info', message: sealed.status === 'scheduled'
+        ? `Queued ${leads.length} leads for ${scheduledAt?.toLocaleString()}. The server will start automatically at ${batchRate} leads/minute.`
+        : `Queued ${leads.length} leads. The server is sending at up to ${batchRate} leads/minute; you can close this page.` });
     } catch (error) {
       console.error("Processing error:", error);
       if (newBatchId) {
@@ -1936,8 +1928,6 @@ export function UploadLeadsTab({
     }
   };
 
-  // Scheduling would require storing lead payloads until the scheduled time.
-  // Lead Push is configured as no-lead-storage, so scheduled pushes are blocked.
   const scheduleProcessing = async (scheduledAt: Date) => {
     if (!selectedUniversity?.detailsLoaded || leads.length === 0) {
       if (selectedUniversity && !selectedUniversity.detailsLoaded) {
@@ -1946,12 +1936,10 @@ export function UploadLeadsTab({
       return;
     }
 
+    if (!sourceLabel.trim()) { setAlert({ type: 'error', message: 'Enter Source of Data before scheduling.' }); return; }
     setIsScheduling(true);
     try {
-      setAlert({
-        type: "error",
-        message: `Scheduling is disabled because it requires saving lead data until ${scheduledAt.toLocaleString()}. Use Push Now for no-storage lead pushing.`,
-      });
+      await startBackgroundProcessing(scheduledAt);
     } catch (error) {
       console.error("Schedule error:", error);
       setAlert({ type: "error", message: "Failed to schedule: " + String(error) });
@@ -2046,6 +2034,7 @@ export function UploadLeadsTab({
   };
 
   const pauseProcessing = async () => {
+    if (batchStatus === 'scheduled') { setAlert({ type: 'info', message: 'This batch has not started yet. Use Stop to cancel it.' }); return; }
     if (!isBackgroundPolling) { setAlert({ type: 'warning', message: 'Please wait until all leads are saved to the server queue before pausing.' }); return; }
     try { await controlBatch('pause'); }
     catch (error) { setAlert({ type: "error", message: String(error) }); return; }
@@ -2102,15 +2091,7 @@ export function UploadLeadsTab({
     setBatchId(null);
     setIsProcessing(false);
     setIsPaused(false);
-    setPushConcurrency(
-      selectedUniversity
-        ? clampUniversityNumber(selectedUniversity.default_push_concurrency, 2, 1, 5)
-        : 2,
-    );
-    setIsConcurrencyUnlocked(false);
-    setShowConcurrencyPin(false);
-    setConcurrencyPin("");
-    setConcurrencyPinError("");
+    setBatchStatus('');
     setStartTime(null);
     currentIndexRef.current = 0;
     setCsvHeaders([]);
@@ -2176,7 +2157,7 @@ export function UploadLeadsTab({
     const elapsed = (Date.now() - startTime) / 1000;
     // Before two packets complete, use configured throughput instead of a
     // cold-start sample. ETA remains visible, then becomes measured/live.
-    const configuredPerLead = 60 / Math.max(1, (selectedUniversity.leads_per_minute || 60) * pushConcurrency);
+    const configuredPerLead = 60 / batchRate;
     const avgTimePerLead = hasStableSample ? elapsed / processedDisplayCount : configuredPerLead;
     const secondsRemaining = Math.round(pendingCount * avgTimePerLead);
     const prefix = hasStableSample ? "" : "Initial estimate: ";
@@ -2187,7 +2168,7 @@ export function UploadLeadsTab({
   };
 
   const hasOpenUploadModal =
-    showColumnMapping || showConcurrencyPin || showSourceEntry || showScheduleModal || showSingleLeadForm;
+    showColumnMapping || showSourceEntry || showScheduleModal || showSingleLeadForm;
   // The fixed action bars previously used the maximum possible z-index and sat
   // above the mapping dialog. On some screens that left only the dark backdrop
   // visible, which looked like the page had blacked out.
@@ -2214,7 +2195,7 @@ export function UploadLeadsTab({
         </div>
       )}
       {batchId && <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-        <span>Processing runs on the server after the full queue is saved. You can close your browser once queuing is complete.</span>
+        <span>{batchStatus === 'scheduled' ? 'Scheduled on the server. You can close your browser; delivery starts at the selected time.' : 'Processing runs on the server after the full queue is saved. You can close your browser once queuing is complete.'}</span>
         <a className="font-semibold text-primary underline" href={`/api/batches/${batchId}/response.csv`}>Download response CSV</a>
       </div>}
 
@@ -2264,6 +2245,10 @@ export function UploadLeadsTab({
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       Saved on the batch so you can find this push later by source name.
                     </p>
+                    {!isProcessing && <label className="mt-2 flex items-center gap-2 text-xs font-medium text-foreground">Leads/minute
+                      <input aria-label="Leads per minute for this push" type="number" min={1} max={100} step={1} className="w-20 rounded-md border bg-background px-2 py-1 text-sm"
+                        value={batchRate} onChange={(event) => setBatchRate(clampUniversityNumber(event.target.value, 60, 1, 100))} />
+                    </label>}
                   </div>
                 )}
 
@@ -2319,14 +2304,22 @@ export function UploadLeadsTab({
               <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-4 py-3 shadow-2xl">
                 <div className="mx-auto flex max-w-6xl justify-end">
                   {!isProcessing ? (
+                    <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                    <button type="button" onClick={() => {
+                      const next = new Date(Date.now() + 5 * 60_000);
+                      setScheduleDate(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`);
+                      setScheduleTime(`${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`);
+                      setShowScheduleModal(true);
+                    }} className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg border px-4 font-medium sm:flex-none"><CalendarClock className="h-4 w-4" /> Schedule</button>
                     <button
                       onClick={processLeads}
                       disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || isAllProcessed}
-                      className="btn-success flex min-h-12 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                      className="btn-success flex min-h-12 flex-1 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                     >
                       <Rocket className="h-5 w-5" />
                       Continue & Push Leads
                     </button>
+                    </div>
                   ) : (
                     <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
                       {isPaused ? (
@@ -2694,6 +2687,12 @@ export function UploadLeadsTab({
           {leads.length > 0 && (
             <div className="card-elevated p-6">
               <h3 className="font-medium text-foreground mb-4">Processing Status</h3>
+              {!isProcessing && <label className="mb-4 block rounded-lg border bg-muted/20 p-3 text-sm font-medium text-foreground">
+                Leads per minute for this run
+                <input type="number" min={1} max={100} step={1} className="input-field mt-2 w-28" value={batchRate}
+                  onChange={(event) => setBatchRate(clampUniversityNumber(event.target.value, 60, 1, 100))} />
+                <span className="ml-3 text-xs font-normal text-muted-foreground">Server enforced, for Push Now and Schedule for Later.</span>
+              </label>}
 
               <div className="mb-4">
                 <div className="flex items-center justify-between text-sm mb-2">
@@ -2745,7 +2744,7 @@ export function UploadLeadsTab({
                     {processedDisplayCount === 0 && (
                       <>
                         <button
-                          onClick={startBackgroundProcessing}
+                          onClick={() => startBackgroundProcessing()}
                           className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium border border-primary text-primary hover:bg-primary/10"
                         >
                           <Clock className="h-5 w-5" />
@@ -2753,9 +2752,9 @@ export function UploadLeadsTab({
                         </button>
                         <button
                           onClick={() => {
-                            const now = new Date();
-                            const defaultDate = now.toISOString().split("T")[0];
-                            const defaultTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes() + 5).padStart(2, "0")}`;
+                            const now = new Date(Date.now() + 5 * 60_000);
+                            const defaultDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                            const defaultTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
                             setScheduleDate(defaultDate);
                             setScheduleTime(defaultTime);
                             setShowScheduleModal(true);
@@ -2824,48 +2823,7 @@ export function UploadLeadsTab({
               <p className="text-sm text-muted-foreground mt-1">
                 Match your CSV columns to the correct lead fields. Each field can only be used once.
               </p>
-              <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <div>
-                    <span className="text-sm font-medium text-foreground">Leads at one time: {pushConcurrency}</span>
-                    <p className="text-xs text-muted-foreground">Locked at 3 by default for safe, fast processing.</p>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label={isConcurrencyUnlocked ? "Lock lead speed" : "Request lead speed unlock"}
-                    onClick={() => {
-                      if (isConcurrencyUnlocked) {
-                        setIsConcurrencyUnlocked(false);
-                        return;
-                      }
-                      setConcurrencyPin("");
-                      setConcurrencyPinError("");
-                      setShowConcurrencyPin(true);
-                    }}
-                    className="rounded-md border border-border bg-card p-2 text-foreground hover:border-primary hover:text-primary"
-                  >
-                    {isConcurrencyUnlocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-                  </button>
-                </div>
-                <div className="grid grid-cols-5 gap-2" role="group" aria-label="Mapping leads processed at one time">
-                  {[1, 2, 3, 4, 5].map((count) => (
-                    <button
-                      key={count}
-                      type="button"
-                      aria-pressed={pushConcurrency === count}
-                      disabled={!isConcurrencyUnlocked}
-                      onClick={() => setPushConcurrency(count)}
-                      className={`rounded-md border py-1.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
-                        pushConcurrency === count
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-card text-foreground hover:border-primary/60"
-                      }`}
-                    >
-                      {count}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <p className="mt-3 text-xs text-muted-foreground">The server sends one lead at a time at the rate selected for this run.</p>
             </div>
 
             <div className="p-6 space-y-4">
@@ -3051,64 +3009,6 @@ export function UploadLeadsTab({
         </div>
       )}
 
-      {showConcurrencyPin && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-xl bg-card p-6 shadow-2xl">
-            <h3 className="font-display text-lg font-bold text-foreground">Unlock lead speed</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Enter the CTO PIN to change leads processed at one time.</p>
-            <input
-              type="password"
-              inputMode="numeric"
-              autoFocus
-              value={concurrencyPin}
-              onChange={(event) => {
-                setConcurrencyPin(event.target.value.replace(/\D/g, "").slice(0, 6));
-                setConcurrencyPinError("");
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && concurrencyPin === "123456") {
-                  setIsConcurrencyUnlocked(true);
-                  setShowConcurrencyPin(false);
-                  setConcurrencyPin("");
-                }
-              }}
-              placeholder="6-digit PIN"
-              aria-label="CTO PIN"
-              className="input-field mt-4 w-full"
-            />
-            {concurrencyPinError && <p className="mt-2 text-sm text-destructive">{concurrencyPinError}</p>}
-            <div className="mt-5 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowConcurrencyPin(false);
-                  setConcurrencyPin("");
-                  setConcurrencyPinError("");
-                }}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (concurrencyPin !== "123456") {
-                    setConcurrencyPinError("Incorrect PIN. Please ask the CTO.");
-                    return;
-                  }
-                  setIsConcurrencyUnlocked(true);
-                  setShowConcurrencyPin(false);
-                  setConcurrencyPin("");
-                }}
-                className="btn-primary"
-              >
-                Unlock
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ✅ DATA SOURCE ENTRY DIALOG — shown after column mapping is applied */}
       {showSourceEntry && selectedUniversity && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4">
@@ -3217,7 +3117,9 @@ export function UploadLeadsTab({
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Rate</label>
-                <p className="text-sm text-muted-foreground">{selectedUniversity.leads_per_minute || 90} leads/minute</p>
+                <input aria-label="Scheduled leads per minute" type="number" min={1} max={100} step={1} className="input-field w-28" value={batchRate}
+                  onChange={(event) => setBatchRate(clampUniversityNumber(event.target.value, 60, 1, 100))} />
+                <p className="mt-1 text-xs text-muted-foreground">The server sends up to this many leads each minute.</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -3226,7 +3128,6 @@ export function UploadLeadsTab({
                     type="date"
                     value={scheduleDate}
                     onChange={(e) => setScheduleDate(e.target.value)}
-                    min={new Date().toISOString().split("T")[0]}
                     className="input-field w-full"
                   />
                 </div>

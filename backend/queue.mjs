@@ -37,15 +37,15 @@ export async function sealQueue(db, batchId) {
     if (!batch || batch.status !== 'uploading') bad('Batch is not ready', 409);
     const [counts] = await connection.execute('SELECT COUNT(*) AS count FROM lms_lead_queue WHERE batch_id = ?', [batchId]);
     if (counts[0].count !== Number(batch.total_leads)) bad('Some leads have not been queued', 409);
-    batch.status = 'processing';
+    batch.status = batch.scheduled_at && new Date(batch.scheduled_at).getTime() > Date.now() ? 'scheduled' : 'processing';
     await connection.execute("UPDATE lms_records SET data = ? WHERE collection = 'upload_batches' AND id = ?", [JSON.stringify(batch), batchId]);
     await connection.commit();
-    return { queued: counts[0].count };
+    return { queued: counts[0].count, status: batch.status, scheduled_at: batch.scheduled_at || null };
   } catch (error) { await connection.rollback(); throw error; }
   finally { connection.release(); }
 }
 
-async function claimNext(db) {
+export async function claimNext(db) {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -53,9 +53,14 @@ async function claimNext(db) {
       FROM lms_lead_queue q JOIN lms_records b ON b.collection = 'upload_batches' AND b.id = q.batch_id
       WHERE q.status = 'queued' AND JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.status')) = 'processing'
       AND JSON_EXTRACT(b.data, '$.is_paused') != true AND JSON_EXTRACT(b.data, '$.is_cancelled') != true
-      ORDER BY q.created_at, q.lead_index LIMIT 1 FOR UPDATE SKIP LOCKED`);
+      AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.next_send_at_ms')) AS UNSIGNED), 0) <= ?
+      ORDER BY q.created_at, q.lead_index LIMIT 1 FOR UPDATE SKIP LOCKED`, [Date.now()]);
     if (!rows.length) { await connection.rollback(); return null; }
     const item = rows[0];
+    const batch = item.batch;
+    const rate = Math.min(100, Math.max(1, Number(batch.leads_per_minute) || 60));
+    batch.next_send_at_ms = Date.now() + Math.ceil(60_000 / rate);
+    await connection.execute("UPDATE lms_records SET data = ? WHERE collection = 'upload_batches' AND id = ?", [JSON.stringify(batch), item.batch_id]);
     await connection.execute("UPDATE lms_lead_queue SET status = 'processing' WHERE batch_id = ? AND lead_index = ?",
       [item.batch_id, item.lead_index]);
     await connection.commit();
@@ -91,7 +96,7 @@ export function applyDeliveryResult(batch, result) {
   batch.consecutive_fail_count = failed ? Number(batch.consecutive_fail_count || 0) + 1 : 0;
   if (batch.consecutive_fail_count >= 25) {
     batch.status = 'paused'; batch.is_paused = true;
-    batch.safety_pause_reason = '25 leads failed consecutively. Check the partner response and discuss before continuing.';
+    batch.safety_pause_reason = '25 leads failed consecutively. Check the partner responses and discuss before continuing.';
     batch.error_message = batch.safety_pause_reason;
     batch.paused_at = new Date().toISOString();
   }
@@ -103,13 +108,23 @@ export async function workQueue({ db, s3, bucket }) {
   try { const result = await processLead({ db, s3, bucket, task: item.task, userId: item.batch.user_id });
     if (result.status === 'Cancelled') {
       const [rows] = await db.execute("SELECT data FROM lms_records WHERE collection = 'upload_batches' AND id = ?", [item.batch_id]);
-      const status = rows[0]?.data?.status === 'cancelled' ? 'cancelled' : 'queued';
-      await db.execute('UPDATE lms_lead_queue SET status = ?, error = NULL WHERE batch_id = ? AND lead_index = ?',
-        [status, item.batch_id, item.lead_index]);
+      await db.execute("UPDATE lms_lead_queue SET status = 'queued', error = NULL WHERE batch_id = ? AND lead_index = ?",
+        [item.batch_id, item.lead_index]);
     } else await finishItem(db, item, null, result); }
   catch (error) { console.error('Queued lead needs review:', error);
     await finishItem(db, item, error); }
   return true;
+}
+
+export async function activateScheduledBatches(db, now = Date.now()) {
+  const [rows] = await db.execute("SELECT id, data FROM lms_records WHERE collection = 'upload_batches' AND record_status = 'scheduled' AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.scheduled_at')) <= ? ORDER BY created_at LIMIT 100", [new Date(now).toISOString()]);
+  let activated = 0;
+  for (const row of rows) {
+    if (!row.data.scheduled_at || new Date(row.data.scheduled_at).getTime() > now) continue;
+    const [result] = await db.execute("UPDATE lms_records SET data = JSON_SET(data, '$.status', 'processing') WHERE collection = 'upload_batches' AND id = ? AND record_status = 'scheduled'", [row.id]);
+    activated += result.affectedRows || 0;
+  }
+  return activated;
 }
 
 export async function controlBatch(db, batchId, action, discussionWith = '') {
@@ -137,7 +152,7 @@ export async function controlBatch(db, batchId, action, discussionWith = '') {
       haltBatch(batchId);
       batch.is_paused = true; batch.status = 'paused'; batch.paused_at = new Date().toISOString();
     } else {
-      if (!['processing', 'paused', 'uploading'].includes(batch.status)) bad('Batch is already finished', 409);
+      if (!['processing', 'paused', 'uploading', 'scheduled'].includes(batch.status)) bad('Batch is already finished', 409);
       haltBatch(batchId);
       batch.is_cancelled = true; batch.is_paused = false; batch.status = 'cancelled';
       batch.completed_at = new Date().toISOString();
