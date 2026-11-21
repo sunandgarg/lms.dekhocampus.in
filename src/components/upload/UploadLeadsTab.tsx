@@ -673,14 +673,31 @@ export function UploadLeadsTab({
         const success = batch.success_count ?? 0;
         const failed = batch.fail_count ?? 0;
         const duplicates = batch.duplicate_count ?? 0;
+        let partnerExample = '';
+        if (failed > 0) {
+          const { data: rejected } = await api.from('leads').select('api_response')
+            .eq('batch_id', pollBatchId).eq('status', 'Fail').limit(1);
+          const response = String(rejected?.[0]?.api_response || '');
+          if (response) {
+            try {
+              const parsed = JSON.parse(response);
+              partnerExample = String(parsed?.message || parsed?.error || response);
+            } catch {
+              partnerExample = response;
+            }
+            partnerExample = partnerExample.replace(/\s+/g, ' ').slice(0, 160);
+          }
+        }
+        const counts = `Accepted: ${success}, Duplicate: ${duplicates}, Rejected: ${failed}.`;
+        const rejection = partnerExample ? ` Partner response example: ${partnerExample}` : '';
         setAlert({
           type: batch.status === "failed" ? "error" : batch.status === "cancelled" ? "info" : failed === 0 && duplicates === 0 ? "success" : "info",
           message:
             batch.status === "failed"
-              ? "Processing stopped. Review the batch history and transaction archive before retrying."
+              ? `Processing stopped. ${counts}${rejection} Review the response CSV before retrying.`
               : batch.status === "cancelled"
-              ? "Processing was cancelled."
-              : `Processing complete! Success: ${success}, Duplicate: ${duplicates}, Failed: ${failed}`,
+              ? `Processing was stopped. ${counts}${rejection}`
+              : `Processing complete. ${counts}${rejection}`,
         });
       }
     } catch (error) {
@@ -2100,7 +2117,7 @@ export function UploadLeadsTab({
   const isAllProcessed = leads.length > 0 && processedDisplayCount >= leads.length;
 
   return (
-    <div className={`space-y-6 ${showUploadActionBar ? "pt-24 pb-32" : ""}`}>
+    <div className={`space-y-6 ${showUploadActionBar ? "pb-80 sm:pb-48" : ""}`}>
       {alert && (
         <div className="mb-6">
           <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
@@ -2126,7 +2143,7 @@ export function UploadLeadsTab({
         typeof document !== "undefined" &&
         createPortal(
           <>
-            <div className="fixed inset-x-0 top-0 z-40 border-b border-border bg-card px-4 py-3 shadow-2xl">
+            <div className="fixed inset-x-0 bottom-0 z-40 max-h-[55vh] overflow-y-auto border-t border-border bg-card px-4 py-3 shadow-2xl">
               <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-foreground">
@@ -2185,14 +2202,25 @@ export function UploadLeadsTab({
                     Upload CSV
                   </button>
                 ) : !isProcessing ? (
-                  <button
-                    onClick={processLeads}
-                    disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || isAllProcessed}
-                    className="btn-success flex min-h-12 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-                  >
-                    <Rocket className="h-5 w-5" />
-                    Continue & Push Leads
-                  </button>
+                  <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                    <button type="button" onClick={() => {
+                      const next = new Date(Date.now() + 5 * 60_000);
+                      setScheduleDate(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`);
+                      setScheduleTime(`${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`);
+                      setShowScheduleModal(true);
+                    }} disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || isAllProcessed}
+                      className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg border px-4 font-medium disabled:opacity-50 sm:flex-none">
+                      <CalendarClock className="h-4 w-4" /> Schedule
+                    </button>
+                    <button
+                      onClick={processLeads}
+                      disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || isAllProcessed}
+                      className="btn-success flex min-h-12 flex-1 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
+                    >
+                      <Rocket className="h-5 w-5" />
+                      Continue & Push Leads
+                    </button>
+                  </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
                     {isPaused ? (
@@ -2223,56 +2251,6 @@ export function UploadLeadsTab({
               </div>
             </div>
 
-            {hasLoadedLeads && (
-              <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-4 py-3 shadow-2xl">
-                <div className="mx-auto flex max-w-6xl justify-end">
-                  {!isProcessing ? (
-                    <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-                    <button type="button" onClick={() => {
-                      const next = new Date(Date.now() + 5 * 60_000);
-                      setScheduleDate(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`);
-                      setScheduleTime(`${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`);
-                      setShowScheduleModal(true);
-                    }} className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg border px-4 font-medium sm:flex-none"><CalendarClock className="h-4 w-4" /> Schedule</button>
-                    <button
-                      onClick={processLeads}
-                      disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || isAllProcessed}
-                      className="btn-success flex min-h-12 flex-1 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
-                    >
-                      <Rocket className="h-5 w-5" />
-                      Continue & Push Leads
-                    </button>
-                    </div>
-                  ) : (
-                    <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
-                      {isPaused ? (
-                        <button
-                          onClick={resumeProcessing}
-                          className="btn-success flex min-h-12 items-center justify-center gap-2"
-                        >
-                          <Play className="h-5 w-5" />
-                          Resume
-                        </button>
-                      ) : (
-                        <button
-                          onClick={pauseProcessing}
-                          className="btn-primary flex min-h-12 items-center justify-center gap-2"
-                        >
-                          <Pause className="h-5 w-5" />
-                          Pause
-                        </button>
-                      )}
-                      <button
-                        onClick={stopProcessing}
-                        className="flex min-h-12 items-center justify-center rounded-lg bg-destructive px-5 font-medium text-destructive-foreground"
-                      >
-                        Stop
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </>,
           document.body,
         )}
@@ -2384,7 +2362,7 @@ export function UploadLeadsTab({
           )}
 
           {leads.length > 0 && (
-            <div className="sticky top-4 z-20 rounded-lg border border-border bg-card/95 p-4 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+            <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-foreground">

@@ -102,7 +102,7 @@ export function LeadPushModule({
     );
   }
 
-  if (!isAdmin && !USER_ALLOWED_LEAD_PUSH_VIEWS.has(activeView)) {
+  if (!isAdmin && location.pathname.startsWith('/lead-push') && !USER_ALLOWED_LEAD_PUSH_VIEWS.has(activeView)) {
     return <Navigate to="/lead-push/upload" replace />;
   }
 
