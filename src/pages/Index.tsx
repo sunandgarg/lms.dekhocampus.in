@@ -696,6 +696,7 @@ const Index = () => {
     setSelectedUploadUniversityState(fullUniversity);
     const slug = uni.slug || uni.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     appCache.setUploadSelectedUniversity(slug);
+    return fullUniversity;
   }, [fetchUniversityDetails]);
 
   const handleBulkImport = useCallback(async (configs: any[]) => {

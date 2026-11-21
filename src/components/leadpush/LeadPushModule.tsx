@@ -22,7 +22,7 @@ interface LeadPushModuleProps {
   onEditUniversity: (uni: any) => void;
   onDeleteUniversity: (id: string) => void;
   onBulkDeleteUniversities?: (ids: string[]) => void;
-  onSelectUploadUniversity: (uni: any) => void;
+  onSelectUploadUniversity: (uni: any) => Promise<any>;
   selectedUploadUniversity: any | null;
   onBulkImport?: (configs: any[]) => void;
 }

@@ -10,7 +10,7 @@ import { appCache } from '@/hooks/useAppCache';
 interface UploadLeadsViewProps {
   universities: any[];
   selectedUniversity: any | null;
-  onSelectUniversity: (uni: any) => void;
+  onSelectUniversity: (uni: any) => Promise<any>;
 }
 
 const stringifyViewValue = (value: unknown): string => {
@@ -182,8 +182,8 @@ export function UploadLeadsView({ universities, selectedUniversity, onSelectUniv
   const handleSelectUniversity = useCallback((uni: any) => {
     const slug = uni.slug || toSlug(uni.name);
     appCache.setUploadSelectedUniversity(slug);
-    onSelectUniversity(uni);
     navigate(`/lead-push/upload/${slug}`, { replace: true });
+    return onSelectUniversity(uni);
   }, [onSelectUniversity, navigate]);
 
   // Update URL when file is uploaded

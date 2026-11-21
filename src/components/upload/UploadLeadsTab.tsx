@@ -14,7 +14,6 @@ import {
   Search,
   FileDown,
   CalendarClock,
-  Trash2,
 } from "lucide-react";
 import { parseCSV, generateSampleCSV } from "@/utils/csvParser";
 import {
@@ -30,7 +29,6 @@ import { SingleLeadForm } from "./SingleLeadForm";
 import { Alert } from "../Alert";
 import { api } from "@/integrations/api/client";
 import { useUploadStatePersistence } from "@/hooks/useUploadStatePersistence";
-import { appCache } from "@/hooks/useAppCache";
 import { isMappedCanonicalDuplicate } from "@/lib/lead/canonicalPayload";
 import { normalizeAmityExternalPartnerPayload } from "@/lib/lead/amityExternalPartner";
 
@@ -292,9 +290,8 @@ function normalizeUniversityRecord(raw: any): University {
 
   return {
     ...raw,
-    detailsLoaded: raw?.detailsLoaded ?? (
-      raw != null && "column_mapping" in raw && "secret_key" in raw && "default_values" in raw
-    ),
+    detailsLoaded: raw != null && ["column_mapping", "secret_key", "auth_type", "custom_headers", "default_values"]
+      .every((field) => field in raw),
     name: String(raw?.name ?? "Unnamed University"),
     api_url: String(raw?.api_url ?? ""),
     college_id: String(raw?.college_id ?? ""),
@@ -375,27 +372,6 @@ const UPGRAD_EXACT_FIELDS = [
   "emailTemplateSuffix",
 ];
 
-const LOCAL_STORAGE_PURGE_KEYS = new Set([
-  "upload:lastSourceLabel",
-  "dekhocampus_upload_leads_state_v1",
-  "dekhocampus_upload_v3",
-  "dekhocampus_upload_processing_v1",
-  "dekhocampus_app_cache_v3",
-  "dekhocampus_app_cache_v4",
-  "lpAdminDashboardCache.v2",
-]);
-
-const LOCAL_STORAGE_PURGE_PREFIXES = ["csv_mapping_", "dekhocampus_"];
-const SESSION_STORAGE_PURGE_KEYS = new Set([
-  "dc_route_state",
-  "app:chunk-reload",
-  "app:has_unsaved_draft",
-  "dekhocampus_upload_session_v1",
-  "dekhocampus_session_state_v2",
-  "dekhocampus_session_state_v3",
-]);
-const SESSION_STORAGE_PURGE_PREFIXES = ["app:page:", "app:sub_slugs", "app:draft_indicator", "dekhocampus_"];
-
 const CSV_HEADER_ALIASES: Record<string, string> = {
   // This typo existed in the CTPL Invertis sample. Keep accepting old files so
   // users do not have to manually repair already-downloaded CSVs.
@@ -472,31 +448,10 @@ function getPayloadTargetForHeader(header: string, columnMapping: Record<string,
   return field.fieldName?.trim() || field.sourceKey?.trim() || "";
 }
 
-function purgeStorageEntries(storage: Storage, keys: Set<string>, prefixes: string[]) {
-  const keysToRemove: string[] = [];
-
-  for (let index = 0; index < storage.length; index += 1) {
-    const key = storage.key(index);
-    if (!key) continue;
-    if (key.startsWith("sb-") || key.includes("auth-token")) continue;
-    if (keys.has(key) || prefixes.some((prefix) => key.startsWith(prefix))) {
-      keysToRemove.push(key);
-    }
-  }
-
-  keysToRemove.forEach((key) => storage.removeItem(key));
-}
-
-async function purgeBrowserCacheStorage() {
-  if (!("caches" in window)) return;
-  const cacheNames = await caches.keys();
-  await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
-}
-
 interface UploadLeadsTabProps {
   universities: University[];
   selectedUniversity?: University | null;
-  onSelectUniversity?: (uni: University) => void;
+  onSelectUniversity?: (uni: University) => Promise<University | void> | void;
   onFileUpload?: (filename: string) => void;
   onClearFile?: () => void;
   onProcessingStateChange?: (state: ProcessingSlugState) => void;
@@ -561,7 +516,7 @@ export function UploadLeadsTab({
   const [startTime, setStartTime] = useState<number | null>(persistedProcessing.startTime);
   const [showSingleLeadForm, setShowSingleLeadForm] = useState(persistedState.showSingleLeadForm);
   const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
-  const [isPurgingCache, setIsPurgingCache] = useState(false);
+  const [universityLoadError, setUniversityLoadError] = useState(false);
   const [customPageSize, setCustomPageSize] = useState<string>("");
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleDate, setScheduleDate] = useState<string>("");
@@ -603,12 +558,25 @@ export function UploadLeadsTab({
     pausedRef.current = isPaused;
   }, [isPaused]);
 
-  // The parent refreshes university records after add/edit. Previously this
-  // component kept the old object when its id was unchanged, so a saved
-  // timeout/concurrency could look correct in Settings but never be used by
-  // Lead Push until a full browser refresh.
+  const loadUniversityDetails = useCallback((university: University) => {
+    if (!onSelectUniversity || requestedDetailsRef.current === university.id) return;
+    requestedDetailsRef.current = university.id;
+    setUniversityLoadError(false);
+    Promise.resolve(onSelectUniversity(university)).then((full) => {
+      if (!full || full.id !== university.id) throw new Error('University settings were not returned');
+      const ready = normalizeUniversityRecord(full);
+      if (!ready.detailsLoaded) throw new Error('University settings are incomplete');
+      setSelectedUniversityState((current) => current?.id === university.id ? ready : current);
+    }).catch((error) => {
+      console.error('Failed to load university settings:', error);
+      if (requestedDetailsRef.current !== university.id) return;
+      requestedDetailsRef.current = null;
+      setUniversityLoadError(true);
+    });
+  }, [onSelectUniversity]);
+
   useEffect(() => {
-    const preferredId = initialSelectedUniversity?.id || persistedState.selectedUniversityId;
+    const preferredId = persistedState.selectedUniversityId || initialSelectedUniversity?.id;
     if (!preferredId) return;
     const freshUniversity = safeUniversities.find((university) => university.id === preferredId);
     const fullUniversity = initialSelectedUniversity?.id === preferredId
@@ -623,11 +591,10 @@ export function UploadLeadsTab({
   }, [initialSelectedUniversity, persistedState.selectedUniversityId, safeUniversities]);
 
   useEffect(() => {
-    if (!selectedUniversity?.id || selectedUniversity.detailsLoaded || !onSelectUniversity ||
-      requestedDetailsRef.current === selectedUniversity.id) return;
-    requestedDetailsRef.current = selectedUniversity.id;
-    onSelectUniversity(selectedUniversity);
-  }, [selectedUniversity, onSelectUniversity]);
+    if (selectedUniversity?.id && !selectedUniversity.detailsLoaded && !universityLoadError) {
+      loadUniversityDetails(selectedUniversity);
+    }
+  }, [selectedUniversity, universityLoadError, loadUniversityDetails]);
 
   // Keep refs in sync for polling
   useEffect(() => {
@@ -758,18 +725,6 @@ export function UploadLeadsTab({
       }
     }
   }, [batchId, persistedProcessing.isProcessing, persistedProcessing.isPaused, persistedProcessing.startTime]);
-
-  useEffect(() => {
-    if (persistedState.selectedUniversityId && safeUniversities.length > 0) {
-      const found = safeUniversities.find((u) => u.id === persistedState.selectedUniversityId);
-      if (found && (!selectedUniversity || selectedUniversity.id !== found.id)) {
-        setSelectedUniversityState(normalizeUniversityRecord(found));
-        if (onSelectUniversity) {
-          onSelectUniversity(found);
-        }
-      }
-    }
-  }, [safeUniversities, persistedState.selectedUniversityId]);
 
   const setLeads = useCallback(
     (newLeads: Lead[]) => {
@@ -1316,13 +1271,12 @@ export function UploadLeadsTab({
 
   const handleUniversityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const uni = safeUniversities.find((u) => u.id === e.target.value);
+    clearAll();
     setSelectedUniversityState(uni || null);
     setBatchRate(clampUniversityNumber(uni?.leads_per_minute, 60, 1, 100));
     persistence.setState({ selectedUniversityId: uni?.id || null });
-    if (uni && onSelectUniversity) {
-      onSelectUniversity(uni);
-    }
-    clearAll();
+    setUniversityLoadError(false);
+    if (uni) loadUniversityDetails(uni);
   };
 
   const handleRateLimitUpdate = (newRate: number) => {
@@ -2102,37 +2056,6 @@ export function UploadLeadsTab({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handlePurgeCache = async () => {
-    setIsPurgingCache(true);
-
-    try {
-      clearAll();
-      persistence.resetAll();
-      appCache.reset();
-      purgeStorageEntries(localStorage, LOCAL_STORAGE_PURGE_KEYS, LOCAL_STORAGE_PURGE_PREFIXES);
-      purgeStorageEntries(sessionStorage, SESSION_STORAGE_PURGE_KEYS, SESSION_STORAGE_PURGE_PREFIXES);
-      await purgeBrowserCacheStorage();
-
-      setSourceLabel("");
-      setPendingSourceLabel("");
-      setPendingDataDescription("");
-      setPendingMapping(null);
-      setShowSourceEntry(false);
-      setAlert({
-        type: "success",
-        message: "Cache purged. Upload state, mappings, stale page cache, and browser cache were cleared.",
-      });
-    } catch (error) {
-      console.error("Failed to purge upload cache:", error);
-      setAlert({
-        type: "error",
-        message: "Could not purge all cache. Please refresh and try again.",
-      });
-    } finally {
-      setIsPurgingCache(false);
-    }
-  };
-
   const handlePageSizeChange = (size: number | "custom") => {
     if (size === "custom") {
       const customVal = parseInt(customPageSize, 10);
@@ -2360,15 +2283,6 @@ export function UploadLeadsTab({
           <p className="text-muted-foreground">Select a university and upload student leads via CSV</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={handlePurgeCache}
-            disabled={isPurgingCache}
-            title="Purge upload cache"
-            className="flex items-center gap-2 rounded-lg border border-destructive/30 px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Trash2 className="h-4 w-4" />
-            {isPurgingCache ? "Purging..." : "Purge Cache"}
-          </button>
           {selectedUniversity?.sample_csv_content && (
             <button
               onClick={() => {
@@ -2413,7 +2327,12 @@ export function UploadLeadsTab({
               ))}
             </select>
             {selectedUniversity && !selectedUniversity.detailsLoaded && (
-              <p className="mt-2 text-sm text-muted-foreground">Loading university settings before upload...</p>
+              universityLoadError ? (
+                <div className="mt-2 flex items-center gap-2 text-sm text-destructive">
+                  <span>Could not load university settings.</span>
+                  <button type="button" className="font-semibold underline" onClick={() => loadUniversityDetails(selectedUniversity)}>Retry</button>
+                </div>
+              ) : <p className="mt-2 text-sm text-muted-foreground">Loading university settings before upload...</p>
             )}
           </div>
 
