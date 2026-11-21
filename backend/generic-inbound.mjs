@@ -120,6 +120,11 @@ export async function receiveGenericLead({ db, s3, bucket, token, payload, idemp
     filters: [{ field: 'key_hash', op: 'eq', value: tokenHash }], single: true });
   if (!connection || !connection.is_active ||
       !timingSafeEqual(Buffer.from(connection.key_hash, 'hex'), Buffer.from(tokenHash, 'hex'))) fail(401, 'Invalid or inactive key');
+  return receiveCapturedLead({ db, s3, bucket, connection, payload, idempotencyKey });
+}
+
+export async function receiveCapturedLead({ db, s3, bucket, connection, payload, idempotencyKey, defaultDestinationIds = [] }) {
+  if (!record(payload)) fail(400, 'Send one JSON lead object');
   const { lead, leadData, extra } = normalizeGenericLead(payload, connection);
   const externalKey = idempotencyKey || payload.external_id || payload.lead?.external_id || '';
   if (externalKey && (typeof externalKey !== 'string' || externalKey.length > 200)) fail(400, 'Invalid idempotency key');
@@ -136,6 +141,9 @@ export async function receiveGenericLead({ db, s3, bucket, token, payload, idemp
   }
   const matchedRules = await matchingInboundRules(db, leadData, payload);
   const destinations = new Map();
+  for (const universityId of defaultDestinationIds) {
+    if (UUID.test(universityId)) destinations.set(universityId, 'Ad integration');
+  }
   for (const rule of matchedRules) for (const universityId of rule.destination_ids) {
     if (UUID.test(universityId) && !destinations.has(universityId)) destinations.set(universityId, rule.name);
   }

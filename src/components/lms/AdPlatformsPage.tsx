@@ -313,7 +313,7 @@ export function AdPlatformsPage() {
       const key = `ad_integration_${setupPlatform}_${setupSubtype}_${Date.now()}`;
       const { error } = await api.from('app_settings').insert({ key, value: JSON.stringify(config) });
       if (error) throw error;
-      toast({ title: 'Integration Created', description: `${setupName} connected successfully` });
+      toast({ title: 'Webhook ready', description: `Add the displayed webhook URL to ${setupName} to start receiving leads.` });
       setShowSetup(false); fetchData();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -507,9 +507,9 @@ export function AdPlatformsPage() {
                     </div>
                   </div>
                   <p className="text-sm">
-                    Connected with <strong>{intg.account_name || intg.name}</strong> to capture the leads using Facebook ads
+                    Webhook configured for <strong>{intg.account_name || intg.name}</strong>
                   </p>
-                  <p className="text-xs text-muted-foreground">{intg.leads_received} leads • → {intg.university_name}</p>
+                  <p className="text-xs text-muted-foreground">{intg.leads_received} leads • {intg.university_id ? `→ ${intg.university_name}` : 'All Leads inbox'}</p>
                   <div className="flex gap-2 justify-center">
                     <Button variant="outline" size="sm">Manage</Button>
                     <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => deleteIntegration(intg.id)}>Remove</Button>
@@ -519,9 +519,9 @@ export function AdPlatformsPage() {
 
               {/* Connect new account card */}
               <Card className="p-5 text-center space-y-3 border-dashed flex flex-col items-center justify-center min-h-[200px]">
-                <p className="text-sm text-muted-foreground">Click here to Connect with<br />new Account</p>
+                <p className="text-sm text-muted-foreground">Create a webhook for a<br />Meta lead form</p>
                 <Button onClick={() => openSetupForCard(detailCard)} className="bg-blue-600 hover:bg-blue-700">
-                  <span className="mr-2">f</span> Connect With Facebook
+                  <span className="mr-2">f</span> Configure Meta webhook
                 </Button>
               </Card>
             </div>
@@ -829,7 +829,7 @@ export function AdPlatformsPage() {
                   {universities.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground mt-1">Leads will be automatically pushed to this university's API</p>
+              <p className="text-xs text-muted-foreground mt-1">By default, leads arrive in All Leads. Choose a university here or create rules under All Leads → Lead automation to push them onward.</p>
             </div>
 
             <div>

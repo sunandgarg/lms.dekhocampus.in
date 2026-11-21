@@ -1,7 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { executeRecords } from './records.mjs';
-import { processLeadBatch } from './lead-processor.mjs';
-import { saveSourceFile } from './archive.mjs';
+import { receiveCapturedLead } from './generic-inbound.mjs';
 
 const SYSTEM_USER = '00000000-0000-4000-8000-000000000000';
 
@@ -22,7 +21,6 @@ async function integrationFor(db, platform, key) {
     try { config = JSON.parse(row.value); } catch { continue; }
     if ((config.platform === platform || platform === 'google' && config.platform === 'bing') &&
       config.is_active !== false && same(config.webhook_key, key)) {
-      if (!config.university_id) fail(400, 'Set a university for this integration');
       return { setting: row, config };
     }
   }
@@ -36,7 +34,10 @@ function normalizeLead(raw, platform, campaign) {
     leadSource: platform === 'facebook' ? 'Facebook Lead Ads' : platform === 'bing' ? 'Bing Lead Ads' : 'Google Lead Ads',
     leadMedium: 'paid', leadCampaign: campaign || raw.campaign || raw.campaign_name || '' };
   if (!lead.name || !lead.email || !lead.mobile) fail(400, 'Webhook lead requires name, email, and mobile');
-  return Object.fromEntries(Object.entries(lead).map(([field, value]) => [field, String(value)]));
+  return { ...Object.fromEntries(Object.entries(raw).filter(([, value]) =>
+    value != null && typeof value !== 'object').map(([field, value]) => [field, String(value)])),
+    ...Object.fromEntries(Object.entries(lead).map(([field, value]) => [field, String(value)])),
+    source: lead.leadSource, medium: lead.leadMedium, campaign: lead.leadCampaign };
 }
 
 async function metaLeads(payload) {
@@ -56,6 +57,7 @@ async function metaLeads(payload) {
     for (const field of full.field_data || []) {
       const key = String(field.name || '').toLowerCase();
       const value = field.values?.[0];
+      if (key && value != null) raw[key] = value;
       if (/email/.test(key)) raw.email = value;
       else if (/phone|mobile/.test(key)) raw.mobile = value;
       else if (/name/.test(key)) raw.name = value;
@@ -63,7 +65,8 @@ async function metaLeads(payload) {
       else if (/state/.test(key)) raw.state = value;
       else if (/course|program/.test(key)) raw.course = value;
     }
-    leads.push(normalizeLead(raw, 'facebook', change.value?.campaign_name || change.value?.ad_name));
+    leads.push({ ...normalizeLead(raw, 'facebook', change.value?.campaign_name || change.value?.ad_name),
+      external_id: leadId });
   }
   return leads;
 }
@@ -74,6 +77,7 @@ function googleLeads(payload, platform) {
     const raw = {};
     for (const column of submission.userData?.userColumnData || []) {
       const key = String(column.columnName || '').toLowerCase();
+      if (key && column.stringValue != null) raw[key] = column.stringValue;
       if (/email/.test(key)) raw.email = column.stringValue;
       else if (/phone/.test(key)) raw.mobile = column.stringValue;
       else if (/name/.test(key)) raw.name = column.stringValue;
@@ -81,7 +85,8 @@ function googleLeads(payload, platform) {
       else if (/state/.test(key)) raw.state = column.stringValue;
       else if (/course|program/.test(key)) raw.course = column.stringValue;
     }
-    return [normalizeLead(raw, platform, submission.campaignName || payload.campaignName)];
+    return [{ ...normalizeLead(raw, platform, submission.campaignName || payload.campaignName),
+      external_id: String(submission.leadFormSubmissionId || payload.leadId || '') }];
   }
   const entries = payload.entries || payload.leads || [payload];
   if (!Array.isArray(entries)) fail(400, 'Invalid Google lead payload');
@@ -94,29 +99,19 @@ export async function handleAdWebhook({ db, s3, bucket, platform, key, payload }
   const actualPlatform = config.platform;
   const leads = actualPlatform === 'facebook' ? await metaLeads(payload) : googleLeads(payload, actualPlatform);
   if (!leads.length || leads.length > 100) fail(400, 'Expected 1 to 100 leads');
-  const universityId = config.university_id;
-  const { data: batch } = await executeRecords(db, { table: 'upload_batches', action: 'insert', select: 'id', single: true,
-    returnRows: true,
-    values: { university_id: universityId, file_name: `${actualPlatform}_ads_${new Date().toISOString()}.json`,
-      total_leads: leads.length, status: 'processing', user_id: SYSTEM_USER, processed_count: 0 } });
-  try {
-    await saveSourceFile({ s3, bucket, batchId: batch.id, filename: `${actualPlatform}.json`,
-      body: Buffer.from(JSON.stringify(payload)), contentType: 'application/json' });
-    const { results } = await processLeadBatch({ db, s3, bucket, userId: SYSTEM_USER,
-      tasks: leads.map((lead) => ({ universityId, batchId: batch.id, sourceLabel: lead.leadSource, leadData: lead })),
-      concurrency: 2 });
-    await executeRecords(db, { table: 'upload_batches', action: 'update', filters: [{ field: 'id', op: 'eq', value: batch.id }],
-      values: { status: 'completed', completed_at: new Date().toISOString() } });
-    config.leads_received = Number(config.leads_received || 0) + results.length;
-    config.last_lead_at = new Date().toISOString();
-    await executeRecords(db, { table: 'app_settings', action: 'update', filters: [{ field: 'id', op: 'eq', value: setting.id }],
-      values: { value: JSON.stringify(config) } });
-    return { success: true, leads_received: results.length, batch_id: batch.id, results };
-  } catch (error) {
-    await executeRecords(db, { table: 'upload_batches', action: 'update', filters: [{ field: 'id', op: 'eq', value: batch.id }],
-      values: { status: 'failed', error_message: String(error.message || error) } });
-    throw error;
+  const results = [];
+  for (const lead of leads) {
+    results.push(await receiveCapturedLead({ db, s3, bucket,
+      connection: { id: setting.id, name: config.name || `${actualPlatform} Ads`,
+        source_label: lead.leadSource, field_map: {}, user_id: SYSTEM_USER },
+      payload: { lead, original_webhook: payload }, idempotencyKey: lead.external_id || undefined,
+      defaultDestinationIds: config.university_id ? [config.university_id] : [] }));
   }
+  config.leads_received = Number(config.leads_received || 0) + results.filter((item) => !item.duplicate).length;
+  config.last_lead_at = new Date().toISOString();
+  await executeRecords(db, { table: 'app_settings', action: 'update', filters: [{ field: 'id', op: 'eq', value: setting.id }],
+    values: { value: JSON.stringify(config) } });
+  return { success: true, leads_received: results.length, results };
 }
 
 export async function verifyMeta(db, key, challenge) {
