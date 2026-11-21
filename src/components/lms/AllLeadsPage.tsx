@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, AlertCircle, Inbox, Users, ArrowUpRight, X } from "lucide-react";
+import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, Users, X } from "lucide-react";
 import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
@@ -55,6 +55,31 @@ function formatDate(iso: string) {
 
 function attributionSource(lead: LmsLead) {
   return lead.extraData?.utm_source || lead.extraData?.utmSource || lead.source || '-';
+}
+
+function leadIdentity(lead: LmsLead) {
+  const email = lead.email.trim().toLowerCase();
+  const mobile = lead.mobile.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+  return email && mobile ? `${email}|${mobile}` : lead.id;
+}
+
+function leadChannel(lead: LmsLead) {
+  const source = `${attributionSource(lead)} ${lead.source} ${lead.triggerSource} ${lead.medium}`.toLowerCase();
+  if (source.includes('facebook') || source.includes('meta')) return 'facebook';
+  if (source.includes('google')) return 'google';
+  return 'other';
+}
+
+function leadState(lead: LmsLead) { return lead.extraData?.state || lead.extraData?.State || ''; }
+function leadCourse(lead: LmsLead) { return lead.course || lead.extraData?.course_interest || lead.extraData?.interest || ''; }
+function leadDay(lead: LmsLead) {
+  const date = new Date(lead.receivedAt);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value || '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
 function downloadCSV(data: LmsLead[], filename: string) {
@@ -122,17 +147,24 @@ export function AllLeadsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [mediumFilter, setMediumFilter] = useState('all');
   const [campaignFilter, setCampaignFilter] = useState("");
+  const [courseFilter, setCourseFilter] = useState('all');
   const [universityFilter, setUniversityFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
+  const [stateFilter, setStateFilter] = useState('all');
+  const [contactFilter, setContactFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [segment, setSegment] = useState('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailLead, setDetailLead] = useState<LmsLead | null>(null);
   const [routeBatches, setRouteBatches] = useState<any[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [sortCol, setSortCol] = useState<string>("receivedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [showAutomation, setShowAutomation] = useState(true);
+  const [showAutomation, setShowAutomation] = useState(false);
 
   const fetchLeads = useCallback(
     async (_forceRefresh = false) => {
@@ -239,33 +271,52 @@ export function AllLeadsPage() {
       .in('id', detailLead.batchIds).then(({ data }) => setRouteBatches(data || []));
   }, [detailLead]);
 
+  const repeatKeys = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const lead of leads.filter((item) => item.isInbound)) {
+      const key = leadIdentity(lead);
+      if (key !== lead.id) counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));
+  }, [leads]);
+
   const filtered = useMemo(() => {
     const result = leads.filter((l) => {
       const q = search.toLowerCase();
-      if (q && !l.name.toLowerCase().includes(q) && !l.email.toLowerCase().includes(q) && !l.mobile.includes(q))
+      if (q && ![l.name, l.email, l.mobile, l.campaign, attributionSource(l), l.medium, leadCourse(l), l.city]
+        .some((value) => String(value || '').toLowerCase().includes(q)))
         return false;
+      if (segment === 'repeat' ? !repeatKeys.has(leadIdentity(l)) : segment !== 'all' && leadChannel(l) !== segment) return false;
       if (statusFilter !== "all" && l.status !== statusFilter) return false;
       if (sourceFilter !== "all" && attributionSource(l) !== sourceFilter) return false;
+      if (mediumFilter !== 'all' && l.medium !== mediumFilter) return false;
       if (campaignFilter && !l.campaign.toLowerCase().includes(campaignFilter.toLowerCase())) return false;
+      if (courseFilter !== 'all' && leadCourse(l) !== courseFilter) return false;
       if (universityFilter !== "all" && l.university !== universityFilter) return false;
       if (cityFilter !== "all" && l.city !== cityFilter) return false;
+      if (stateFilter !== 'all' && leadState(l) !== stateFilter) return false;
+      if (contactFilter === 'both' && (!l.email || !l.mobile)) return false;
+      if (contactFilter === 'email' && !l.email) return false;
+      if (contactFilter === 'mobile' && !l.mobile) return false;
+      const day = leadDay(l);
+      if ((dateFrom && day < dateFrom) || (dateTo && day > dateTo)) return false;
       return true;
     });
-    result.sort((a: any, b: any) => {
-      const av = sortCol === 'source' ? attributionSource(a) : a[sortCol] || "";
-      const bv = sortCol === 'source' ? attributionSource(b) : b[sortCol] || "";
-      return sortDir === "asc" ? (av > bv ? 1 : -1) : av < bv ? 1 : -1;
+    result.sort((a, b) => {
+      const av = sortCol === 'source' ? attributionSource(a) : String(a[sortCol as keyof LmsLead] ?? '');
+      const bv = sortCol === 'source' ? attributionSource(b) : String(b[sortCol as keyof LmsLead] ?? '');
+      const comparison = av.localeCompare(bv, undefined, { sensitivity: 'base', numeric: true });
+      return sortDir === 'asc' ? comparison : -comparison;
     });
     return result;
-  }, [leads, search, statusFilter, sourceFilter, campaignFilter, universityFilter, cityFilter, sortCol, sortDir]);
+  }, [leads, repeatKeys, search, segment, statusFilter, sourceFilter, mediumFilter, campaignFilter,
+    courseFilter, universityFilter, cityFilter, stateFilter, contactFilter, dateFrom, dateTo, sortCol, sortDir]);
 
   // A person is grouped only when both contact identifiers agree. Every submission remains available below the row.
   const grouped = useMemo(() => {
     const groups = new Map<string, LmsLead[]>();
     for (const lead of filtered) {
-      const email = lead.email.trim().toLowerCase();
-      const mobile = lead.mobile.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
-      const key = email && mobile ? `${email}|${mobile}` : lead.id;
+      const key = leadIdentity(lead);
       groups.set(key, [...(groups.get(key) || []), lead]);
     }
     return [...groups.entries()].map(([key, items]) => {
@@ -281,26 +332,19 @@ export function AllLeadsPage() {
     return found?.[1] || '-';
   };
 
-  const stats = useMemo(() => {
-    let pushed = 0,
-      failed = 0,
-      pending = 0,
-      duplicate = 0;
-    for (const l of leads) {
-      if (l.status === "Pushed") pushed++;
-      else if (l.status === "Failed") failed++;
-      else if (l.status === "Pending") pending++;
-      else if (l.status === "Duplicate") duplicate++;
-    }
-    const total = leads.length;
-    const attempted = pushed + failed + duplicate;
-    return { total, pushed, failed, pending, duplicate, received: leads.filter((lead) => lead.status === 'Received').length,
-      rate: attempted ? ((pushed / attempted) * 100).toFixed(1) : "0" };
-  }, [leads]);
+  const segmentCounts = useMemo(() => {
+    const count = (items: LmsLead[]) => new Set(items.map(leadIdentity)).size;
+    return { all: count(leads), facebook: count(leads.filter((lead) => leadChannel(lead) === 'facebook')),
+      google: count(leads.filter((lead) => leadChannel(lead) === 'google')),
+      other: count(leads.filter((lead) => leadChannel(lead) === 'other')), repeat: repeatKeys.size };
+  }, [leads, repeatKeys]);
 
   const sources = useMemo(() => [...new Set(leads.map(attributionSource).filter((value) => value !== '-'))], [leads]);
+  const media = useMemo(() => [...new Set(leads.map((lead) => lead.medium).filter(Boolean))], [leads]);
+  const courses = useMemo(() => [...new Set(leads.map(leadCourse).filter(Boolean))], [leads]);
   const universities = useMemo(() => [...new Set(leads.map((l) => l.university).filter(Boolean))], [leads]);
   const cities = useMemo(() => [...new Set(leads.map((l) => l.city).filter(Boolean))], [leads]);
+  const states = useMemo(() => [...new Set(leads.map(leadState).filter(Boolean))], [leads]);
 
   const toggleSort = (col: string) => {
     if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -379,14 +423,14 @@ export function AllLeadsPage() {
       )
     ) : null;
 
-  const kpiClick = (status: string) => setStatusFilter(status === statusFilter ? "all" : status);
-
   const clearFilters = () => {
-    setSearch(''); setStatusFilter('all'); setSourceFilter('all'); setCampaignFilter('');
-    setUniversityFilter('all'); setCityFilter('all');
+    setSearch(''); setSegment('all'); setStatusFilter('all'); setSourceFilter('all'); setMediumFilter('all');
+    setCampaignFilter(''); setCourseFilter('all'); setUniversityFilter('all'); setCityFilter('all');
+    setStateFilter('all'); setContactFilter('all'); setDateFrom(''); setDateTo('');
   };
-  const activeFilterCount = [statusFilter !== 'all', sourceFilter !== 'all', !!campaignFilter,
-    universityFilter !== 'all', cityFilter !== 'all'].filter(Boolean).length;
+  const activeFilterCount = [statusFilter !== 'all', sourceFilter !== 'all', mediumFilter !== 'all',
+    !!campaignFilter, courseFilter !== 'all', universityFilter !== 'all', cityFilter !== 'all',
+    stateFilter !== 'all', contactFilter !== 'all', !!dateFrom, !!dateTo].filter(Boolean).length;
   const detailField = (_lead: LmsLead, label: string, value: unknown) => (
     <div className="min-w-0" key={label}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -401,12 +445,12 @@ export function AllLeadsPage() {
   );
 
   return (
-    <div className="container mx-auto max-w-[1600px] px-4 py-6 space-y-5">
+    <div className="mx-auto w-full max-w-[1760px] space-y-5 px-5 py-6 md:px-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary"><Inbox className="h-4 w-4" /> Lead workspace</div>
-          <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">All Leads</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Review incoming enquiries, see each submission and its delivery, and follow up with the right student. File uploads remain in Upload History.</p>
+          <h1 className="text-3xl font-display font-bold tracking-tight text-foreground md:text-4xl">All Leads</h1>
+          <p className="mt-2 max-w-2xl text-base text-muted-foreground">Find the right student by campaign, course, location or delivery status. Repeat enquiries stay together in their history.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowAutomation(!showAutomation)} aria-expanded={showAutomation}>
@@ -420,55 +464,80 @@ export function AllLeadsPage() {
 
       {showAutomation && <LeadAutomationSettings />}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        {[
-          { label: 'Submissions loaded', value: stats.total, note: hasMore ? 'Older records available' : 'All loaded records', icon: Inbox, filter: 'all', tone: 'text-primary bg-primary/10' },
-          { label: 'Unique contacts', value: new Set(leads.map((lead) => {
-            const email = lead.email.trim().toLowerCase(); const mobile = lead.mobile.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
-            return email && mobile ? `${email}|${mobile}` : lead.id;
-          })).size, note: 'Email and phone match', icon: Users, filter: '', tone: 'text-blue-600 bg-blue-500/10' },
-          { label: 'Received', value: stats.received, note: 'Incoming lead records', icon: Inbox, filter: 'Received', tone: 'text-sky-700 bg-sky-500/10' },
-          { label: 'Failed pushes', value: stats.failed, note: 'May need retry', icon: AlertCircle, filter: 'Failed', tone: 'text-destructive bg-destructive/10' },
-          { label: 'Pushed', value: stats.pushed, note: `${stats.rate}% of attempted deliveries`, icon: ArrowUpRight, filter: 'Pushed', tone: 'text-emerald-700 bg-emerald-500/10' },
-        ].map((item) => <button key={item.label} type="button" onClick={() => item.filter && kpiClick(item.filter)}
-          className={`rounded-xl border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${item.filter && statusFilter === item.filter ? 'border-primary' : 'border-border'}`}>
-          <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-muted-foreground">{item.label}</span><span className={`rounded-lg p-1.5 ${item.tone}`}><item.icon className="h-4 w-4" /></span></div>
-          <div className="mt-3 text-2xl font-display font-bold tabular-nums">{item.value}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{item.note}</div>
-        </button>)}
-      </div>
+      <Card className="overflow-hidden rounded-2xl border-primary/20 bg-gradient-to-r from-primary/10 via-background to-background shadow-sm">
+        <div className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center md:p-6">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Leads in this inbox</p>
+            <div className="mt-2 flex items-end gap-3"><strong className="font-display text-5xl font-bold leading-none tabular-nums text-foreground">{segmentCounts.all}</strong><span className="pb-1 text-sm text-muted-foreground">distinct leads</span></div>
+            <p className="mt-3 text-sm text-muted-foreground">A repeat submission counts once when both email and mobile match.{hasMore ? ' Load older records to include them in this count.' : ''}</p>
+          </div>
+          <div className="rounded-xl border bg-background/80 px-4 py-3 text-sm text-muted-foreground">
+            <Users className="mb-2 h-5 w-5 text-primary" />
+            <p className="font-medium text-foreground">One student, one lead</p>
+            <p>Open a row to review every matching submission and its source.</p>
+          </div>
+        </div>
+      </Card>
 
       <Card className="overflow-hidden shadow-sm">
         <div className="space-y-3 border-b p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div><h2 className="font-semibold">Lead inbox</h2><p className="text-xs text-muted-foreground">{filtered.length} matching submissions · {grouped.length} contacts shown{hasMore ? ' · load older leads for more' : ''}</p></div>
+            <div><h2 className="text-lg font-semibold">Lead inbox</h2><p className="text-sm text-muted-foreground">{grouped.length} distinct leads in this view{hasMore ? ' · older records available' : ''}</p></div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} aria-expanded={showFilters}>
                 <Filter className="mr-2 h-4 w-4" /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => downloadCSV(filtered, 'lead-inbox-view.csv')} disabled={!filtered.length}>
-                <Download className="mr-2 h-4 w-4" /> Export view ({filtered.length})
+              <Button variant="outline" size="sm" onClick={() => downloadCSV(grouped.map((group) => group.latest), 'lead-inbox-view.csv')} disabled={!grouped.length}>
+                <Download className="mr-2 h-4 w-4" /> Export leads
               </Button>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-2 border-b pb-3 sm:grid-cols-3 xl:grid-cols-5" aria-label="Lead groups">
+            {[
+              ['all', 'All leads', segmentCounts.all],
+              ['facebook', 'Meta / Facebook', segmentCounts.facebook],
+              ['google', 'Google', segmentCounts.google],
+              ['other', 'Other sources', segmentCounts.other],
+              ['repeat', 'Repeat enquiries', segmentCounts.repeat],
+            ].map(([value,label,count]) => <button key={value} type="button" aria-pressed={segment === value} onClick={() => setSegment(String(value))}
+              className={`flex min-h-11 items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${segment === value ? 'border-primary bg-primary/10 text-primary' : 'bg-background hover:border-primary/40 hover:bg-muted/40'}`}>
+              <span>{label}</span><span className="rounded-md bg-background px-2 py-0.5 font-semibold tabular-nums text-foreground">{count}</span>
+            </button>)}
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input aria-label="Search leads" placeholder="Search name, email or mobile" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+              <Input aria-label="Search leads" placeholder="Search student, mobile, email, campaign or course" value={search} onChange={(e) => setSearch(e.target.value)} className="h-11 pl-10 text-base" />
             </div>
             <div className="flex flex-wrap gap-1" aria-label="Filter by delivery status">
               {[['all','All'],['Received','Received'],['Failed','Needs attention'],['Pushed','Pushed']].map(([value,label]) =>
                 <Button key={value} size="sm" variant={statusFilter === value ? 'default' : 'ghost'} onClick={() => setStatusFilter(value)}>{label}</Button>)}
             </div>
           </div>
-          {showFilters && <div className="grid gap-2 rounded-lg bg-muted/40 p-3 sm:grid-cols-2 lg:grid-cols-5">
-            <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger aria-label="Status filter"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent>
-              {['all','Received','Pending','Pushed','Duplicate','Failed','Needs review'].map((value) => <SelectItem key={value} value={value}>{value === 'all' ? 'All statuses' : value}</SelectItem>)}
-            </SelectContent></Select>
-            <Select value={sourceFilter} onValueChange={setSourceFilter}><SelectTrigger aria-label="Source filter"><SelectValue placeholder="Source" /></SelectTrigger><SelectContent><SelectItem value="all">All sources</SelectItem>{sources.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
-            <Select value={universityFilter} onValueChange={setUniversityFilter}><SelectTrigger aria-label="Destination filter"><SelectValue placeholder="Destination" /></SelectTrigger><SelectContent><SelectItem value="all">All destinations</SelectItem>{universities.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
-            <Select value={cityFilter} onValueChange={setCityFilter}><SelectTrigger aria-label="City filter"><SelectValue placeholder="City" /></SelectTrigger><SelectContent><SelectItem value="all">All cities</SelectItem>{cities.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
-            <Input aria-label="Campaign filter" placeholder="Campaign contains..." value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)} />
-            <Button variant="ghost" size="sm" onClick={clearFilters} className="justify-start lg:col-span-5"><X className="mr-2 h-4 w-4" /> Clear filters</Button>
+          {showFilters && <div className="rounded-xl border bg-muted/25 p-3 md:p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold">Refine your lead list</p>
+              <Button variant="ghost" size="sm" onClick={clearFilters}><X className="mr-2 h-4 w-4" /> Clear all</Button></div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <section className="space-y-2 rounded-lg border bg-background p-3"><h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Acquisition</h3>
+                <Select value={sourceFilter} onValueChange={setSourceFilter}><SelectTrigger aria-label="Source filter"><SelectValue placeholder="Source" /></SelectTrigger><SelectContent><SelectItem value="all">All sources</SelectItem>{sources.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+                <Select value={mediumFilter} onValueChange={setMediumFilter}><SelectTrigger aria-label="Medium filter"><SelectValue placeholder="Medium" /></SelectTrigger><SelectContent><SelectItem value="all">All media</SelectItem>{media.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+                <Input aria-label="Campaign filter" list="all-leads-campaigns" placeholder="Campaign contains..." value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)} />
+                <datalist id="all-leads-campaigns">{[...new Set(leads.map((lead) => lead.campaign).filter(Boolean))].map((value) => <option key={value} value={value} />)}</datalist>
+              </section>
+              <section className="space-y-2 rounded-lg border bg-background p-3"><h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Student</h3>
+                <Select value={courseFilter} onValueChange={setCourseFilter}><SelectTrigger aria-label="Course filter"><SelectValue placeholder="Course" /></SelectTrigger><SelectContent><SelectItem value="all">All courses / interests</SelectItem>{courses.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+                <div className="grid grid-cols-2 gap-2"><Select value={stateFilter} onValueChange={setStateFilter}><SelectTrigger aria-label="State filter"><SelectValue placeholder="State" /></SelectTrigger><SelectContent><SelectItem value="all">All states</SelectItem>{states.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+                  <Select value={cityFilter} onValueChange={setCityFilter}><SelectTrigger aria-label="City filter"><SelectValue placeholder="City" /></SelectTrigger><SelectContent><SelectItem value="all">All cities</SelectItem>{cities.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></div>
+                <Select value={contactFilter} onValueChange={setContactFilter}><SelectTrigger aria-label="Contact details filter"><SelectValue placeholder="Contact details" /></SelectTrigger><SelectContent><SelectItem value="all">Any contact details</SelectItem><SelectItem value="both">Email and mobile</SelectItem><SelectItem value="email">Has email</SelectItem><SelectItem value="mobile">Has mobile</SelectItem></SelectContent></Select>
+              </section>
+              <section className="space-y-2 rounded-lg border bg-background p-3"><h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Delivery and date</h3>
+                <div className="grid grid-cols-2 gap-2"><Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger aria-label="Status filter"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent>
+                  {['all','Received','Pending','Pushed','Duplicate','Failed','Needs review'].map((value) => <SelectItem key={value} value={value}>{value === 'all' ? 'All statuses' : value}</SelectItem>)}
+                </SelectContent></Select>
+                  <Select value={universityFilter} onValueChange={setUniversityFilter}><SelectTrigger aria-label="Destination filter"><SelectValue placeholder="Destination" /></SelectTrigger><SelectContent><SelectItem value="all">All destinations</SelectItem>{universities.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></div>
+                <div className="grid grid-cols-2 gap-2"><Input type="date" aria-label="Received from date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} /><Input type="date" aria-label="Received through date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} /></div>
+                <p className="text-xs text-muted-foreground">Dates use India time. Filters can be combined.</p>
+              </section>
+            </div>
           </div>}
         </div>
 
@@ -481,7 +550,7 @@ export function AllLeadsPage() {
 
         <div className="overflow-x-auto">
           {loading ? <div className="flex items-center justify-center py-16 text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading leads...</div> :
-          <Table className="min-w-[1280px]">
+          <Table className="min-w-[1420px] text-base">
             <TableHeader><TableRow className="table-header">
               <TableHead className="w-10"><Checkbox aria-label="Select all matching submissions" checked={filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>
               {sortHeader('Name','name')}
@@ -502,12 +571,12 @@ export function AllLeadsPage() {
                 (expanded.has(key) ? items : [latest]).map((lead, index) => <TableRow key={lead.id} className={index > 0 ? 'bg-muted/20' : 'hover:bg-muted/30'}>
                   <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>
                   <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button></TableCell>
-                  <TableCell className="max-w-[220px] truncate align-top text-sm" title={lead.email}>{lead.email || '-'}</TableCell>
-                  <TableCell className="whitespace-nowrap align-top text-sm">{lead.mobile || '-'}</TableCell>
+                  <TableCell className="max-w-[220px] truncate align-top text-base" title={lead.email}>{lead.email || '-'}</TableCell>
+                  <TableCell className="whitespace-nowrap align-top text-base">{lead.mobile || '-'}</TableCell>
                   <TableCell className="align-top"><Badge variant="outline" className="max-w-[150px] truncate">{attributionSource(lead)}</Badge></TableCell>
-                  <TableCell className="align-top text-sm">{lead.medium || field(lead,'utm_medium','utmMedium')}</TableCell>
-                  <TableCell className="max-w-[200px] truncate align-top text-sm" title={lead.campaign}>{lead.campaign || field(lead,'utm_campaign','utmCampaign')}</TableCell>
-                  <TableCell className="whitespace-nowrap align-top"><div className="text-sm font-medium tabular-nums">{formatDate(lead.receivedAt)}</div><div className="mt-1 text-xs text-muted-foreground">{index > 0 ? 'Earlier submission' : 'Most recent'}</div></TableCell>
+                  <TableCell className="align-top text-base">{lead.medium || field(lead,'utm_medium','utmMedium')}</TableCell>
+                  <TableCell className="max-w-[200px] truncate align-top text-base" title={lead.campaign}>{lead.campaign || field(lead,'utm_campaign','utmCampaign')}</TableCell>
+                  <TableCell className="whitespace-nowrap align-top"><div className="text-base font-medium tabular-nums">{formatDate(lead.receivedAt)}</div><div className="mt-1 text-xs text-muted-foreground">{index > 0 ? 'Earlier submission' : 'Most recent'}</div></TableCell>
                   <TableCell className="align-top"><div className="flex flex-wrap items-center gap-2">{statusBadge(lead.status)}<span className="max-w-[170px] truncate text-xs text-muted-foreground" title={lead.university}>{lead.university}</span></div>
                     {lead.failReason && <p className="mt-1 max-w-[240px] truncate text-xs text-destructive" title={lead.failReason}>{lead.failReason}</p>}</TableCell>
                   <TableCell className="align-top">{index === 0 && items.length > 1 ? <button type="button" aria-expanded={expanded.has(key)} aria-label={`${expanded.has(key) ? 'Collapse' : 'Expand'} ${items.length} submissions for ${lead.name || 'this contact'}`}
@@ -520,8 +589,8 @@ export function AllLeadsPage() {
           </Table>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground">
-          <span>Showing {grouped.length} contacts from {filtered.length} loaded submissions. Same email and mobile are grouped; matching submissions remain available.</span>
-          <span>Export includes the current loaded view.</span>
+          <span>Showing {grouped.length} leads. Matching email and mobile submissions are nested in each lead's history.</span>
+          <span>Export includes one row per visible lead.</span>
         </div>
       </Card>
       {hasMore && <div className="text-center"><Button variant="outline" onClick={() => setPageCount((count) => count + 1)} disabled={loading}>Load older leads</Button></div>}
