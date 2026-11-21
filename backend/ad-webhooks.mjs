@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { executeRecords } from './records.mjs';
 import { receiveCapturedLead } from './generic-inbound.mjs';
 
@@ -11,6 +11,12 @@ function same(a, b) {
 }
 
 function fail(status, message) { throw Object.assign(new Error(message), { status }); }
+
+export function verifyMetaSignature(body, signature, secret) {
+  if (!secret || !/^sha256=[a-f0-9]{64}$/i.test(String(signature || ''))) return false;
+  const expected = createHmac('sha256', secret).update(body).digest('hex');
+  return same(expected, String(signature).slice(7).toLowerCase());
+}
 
 async function integrationFor(db, platform, key) {
   if (!key) fail(401, 'Webhook key required');
@@ -47,7 +53,7 @@ async function metaLeads(payload) {
     if (change.field !== 'leadgen') continue;
     const leadId = String(change.value?.leadgen_id || '');
     if (!/^\d{5,30}$/.test(leadId) || !process.env.META_ACCESS_TOKEN) fail(503, 'Meta lead retrieval is not configured');
-    const response = await fetch(`https://graph.facebook.com/v21.0/${leadId}?fields=field_data`, {
+    const response = await fetch(`https://graph.facebook.com/v27.0/${leadId}?fields=field_data`, {
       headers: { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` },
       signal: AbortSignal.timeout(10_000), redirect: 'error',
     });
@@ -111,8 +117,13 @@ export function googleLeads(payload, platform) {
   return entries.map((entry) => normalizeLead(entry, platform));
 }
 
-export async function handleAdWebhook({ db, s3, bucket, platform, key, payload }) {
+export async function handleAdWebhook({ db, s3, bucket, platform, key, payload, rawBody, signature }) {
   if (!payload || typeof payload !== 'object') fail(400, 'Invalid webhook payload');
+  if (platform === 'facebook' && Array.isArray(payload.entry)) {
+    if (!verifyMetaSignature(rawBody, signature, process.env.META_APP_SECRET)) fail(401, 'Invalid Meta signature');
+    if (payload.object !== 'page' || (process.env.META_PAGE_ID &&
+      payload.entry.some((entry) => String(entry.id) !== process.env.META_PAGE_ID))) fail(400, 'Unexpected Meta Page');
+  }
   const { setting, config } = await integrationFor(db, platform, key || payload.google_key || payload.Google_key);
   const actualPlatform = config.platform;
   const leads = actualPlatform === 'facebook' ? await metaLeads(payload) : googleLeads(payload, actualPlatform);

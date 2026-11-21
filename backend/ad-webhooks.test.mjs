@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { googleLeads } from './ad-webhooks.mjs';
+import { createHmac } from 'node:crypto';
+import { googleLeads, verifyMetaSignature } from './ad-webhooks.mjs';
+
+test('Meta webhook signature authenticates the exact request bytes', () => {
+  const body = Buffer.from('{"object":"page","entry":[]}');
+  const signature = `sha256=${createHmac('sha256', 'test-secret').update(body).digest('hex')}`;
+  assert.equal(verifyMetaSignature(body, signature, 'test-secret'), true);
+  assert.equal(verifyMetaSignature(Buffer.from('{}'), signature, 'test-secret'), false);
+  assert.equal(verifyMetaSignature(body, signature, ''), false);
+});
 
 test('Google Ads published webhook shape accepts name and phone without email', () => {
   const leads = googleLeads({ lead_id: 'google-123', campaign_id: 42, is_test: true,

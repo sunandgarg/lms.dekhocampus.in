@@ -54,8 +54,7 @@ async function readBody(request, maxBytes) {
   return Buffer.concat(chunks);
 }
 
-async function readJson(request) {
-  const body = await readBody(request, MAX_JSON_BYTES);
+function parseJson(body) {
   try { return JSON.parse(body.toString('utf8')); }
   catch {
     const error = new Error('Invalid JSON');
@@ -63,6 +62,8 @@ async function readJson(request) {
     throw error;
   }
 }
+
+async function readJson(request) { return parseJson(await readBody(request, MAX_JSON_BYTES)); }
 
 function clientUser(user) {
   return {
@@ -163,9 +164,11 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
       }
       const adWebhook = /^\/api\/webhooks\/(meta|google)-ads-webhook$/.exec(url.pathname);
       if (adWebhook && method === 'POST') {
+        const rawBody = await readBody(request, MAX_JSON_BYTES);
         const result = await handleAdWebhook({ db, s3, bucket,
           platform: adWebhook[1] === 'meta' ? 'facebook' : 'google',
-          key: url.searchParams.get('key'), payload: await readJson(request) });
+          key: url.searchParams.get('key'), payload: parseJson(rawBody), rawBody,
+          signature: request.headers['x-hub-signature-256'] });
         return send(response, 200, result);
       }
       if (url.pathname === '/api/webhooks/netcore-email-webhook' && method === 'POST') {
