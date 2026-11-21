@@ -52,14 +52,27 @@ function normalizeLead(raw, platform, campaign) {
     source: lead.leadSource, medium: lead.leadMedium, campaign: lead.leadCampaign };
 }
 
-async function metaLeads(payload) {
+async function metaCampaignName(adId) {
+  if (!/^\d{5,30}$/.test(String(adId || ''))) return '';
+  try {
+    const response = await fetch(`https://graph.facebook.com/v27.0/${adId}?fields=campaign%7Bid%2Cname%7D`, {
+      headers: { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` },
+      signal: AbortSignal.timeout(10_000), redirect: 'error',
+    });
+    if (!response.ok) return '';
+    const ad = await response.json();
+    return typeof ad.campaign?.name === 'string' ? ad.campaign.name.trim().slice(0, 255) : '';
+  } catch { return ''; }
+}
+
+export async function metaLeads(payload) {
   if (!Array.isArray(payload.entry)) return [normalizeLead(payload, 'facebook')];
   const leads = [];
   for (const entry of payload.entry) for (const change of entry.changes || []) {
     if (change.field !== 'leadgen') continue;
     const leadId = String(change.value?.leadgen_id || '');
     if (!/^\d{5,30}$/.test(leadId) || !process.env.META_ACCESS_TOKEN) fail(503, 'Meta lead retrieval is not configured');
-    const response = await fetch(`https://graph.facebook.com/v27.0/${leadId}?fields=field_data`, {
+    const response = await fetch(`https://graph.facebook.com/v27.0/${leadId}?fields=field_data%2Cad_id%2Ccampaign_id`, {
       headers: { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` },
       signal: AbortSignal.timeout(10_000), redirect: 'error',
     });
@@ -77,8 +90,10 @@ async function metaLeads(payload) {
       else if (/state/.test(key)) raw.state = value;
       else if (/course|program/.test(key)) raw.course = value;
     }
-    leads.push({ ...normalizeLead(raw, 'facebook', change.value?.campaign_name || change.value?.ad_name),
-      external_id: leadId });
+    const adId = String(full.ad_id || change.value?.ad_id || '');
+    const campaignName = await metaCampaignName(adId) || String(change.value?.campaign_name || '').trim();
+    leads.push({ ...normalizeLead(raw, 'facebook', campaignName),
+      external_id: leadId, ad_id: adId, campaign_id: String(full.campaign_id || change.value?.campaign_id || '') });
   }
   return leads;
 }
