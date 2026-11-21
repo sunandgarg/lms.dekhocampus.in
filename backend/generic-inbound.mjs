@@ -90,7 +90,7 @@ export function normalizeGenericLead(payload, connection) {
     mobile: field(raw, mapping, 'mobile', ['phone', 'phone_number', 'mobile_number', 'contact']),
     source: field(raw, mapping, 'source', ['lead_source', 'utm_source']) || connection.source_label,
     campaign: field(raw, mapping, 'campaign', ['lead_campaign', 'utm_campaign']),
-    course: field(raw, mapping, 'course', ['program', 'interest']),
+    course: field(raw, mapping, 'course', ['course_interest', 'course_of_interest', 'program', 'interest']),
     city: field(raw, mapping, 'city', []),
     state: field(raw, mapping, 'state', []),
   };

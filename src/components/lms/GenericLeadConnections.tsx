@@ -17,6 +17,9 @@ const MAPPABLE = [
   { key: 'name', label: 'Name field' }, { key: 'email', label: 'Email field' },
   { key: 'mobile', label: 'Phone field' }, { key: 'source', label: 'Source field' },
   { key: 'campaign', label: 'Campaign field' },
+  { key: 'course', label: 'Course / interest field' },
+  { key: 'city', label: 'City field' }, { key: 'state', label: 'State field' },
+  { key: 'medium', label: 'UTM medium field' },
 ];
 
 async function call(path: string, method = 'GET', body?: unknown) {

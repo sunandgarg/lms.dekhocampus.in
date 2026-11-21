@@ -123,6 +123,7 @@ export function AllLeadsPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [sortCol, setSortCol] = useState<string>("receivedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const fetchLeads = useCallback(
     async (_forceRefresh = false) => {
@@ -246,6 +247,28 @@ export function AllLeadsPage() {
     });
     return result;
   }, [leads, search, statusFilter, sourceFilter, campaignFilter, universityFilter, cityFilter, sortCol, sortDir]);
+
+  // A person is grouped only when both contact identifiers agree. Every submission remains available below the row.
+  const grouped = useMemo(() => {
+    const groups = new Map<string, LmsLead[]>();
+    for (const lead of filtered) {
+      const email = lead.email.trim().toLowerCase();
+      const mobile = lead.mobile.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+      const key = email && mobile ? `${email}|${mobile}` : lead.id;
+      groups.set(key, [...(groups.get(key) || []), lead]);
+    }
+    return [...groups.entries()].map(([key, items]) => {
+      const history = [...items].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+      return { key, items: history, latest: history[0], firstAt: history[history.length - 1].receivedAt };
+    });
+  }, [filtered]);
+
+  const field = (lead: LmsLead, ...names: string[]) => {
+    const values = lead.extraData || {};
+    const found = Object.entries(values).find(([key]) => names.some((name) =>
+      key.toLowerCase().replace(/[^a-z0-9]/g, '') === name.toLowerCase().replace(/[^a-z0-9]/g, '')));
+    return found?.[1] || '-';
+  };
 
   const stats = useMemo(() => {
     let pushed = 0,
@@ -515,6 +538,7 @@ export function AllLeadsPage() {
                       onCheckedChange={toggleAll}
                     />
                   </TableHead>
+                  <TableHead>History</TableHead>
                   <TableHead className="cursor-pointer" onClick={() => toggleSort("name")}>
                     Name <SortIcon col="name" />
                   </TableHead>
@@ -525,6 +549,24 @@ export function AllLeadsPage() {
                   </TableHead>
                   <TableHead>Campaign</TableHead>
                   <TableHead>City</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>UTM source</TableHead>
+                  <TableHead>UTM medium</TableHead>
+                  <TableHead>UTM campaign</TableHead>
+                  <TableHead>Course / interest</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Device</TableHead>
+                  <TableHead>Mode</TableHead>
+                  <TableHead>OTP verified</TableHead>
+                  <TableHead>Consent</TableHead>
+                  <TableHead>Campus</TableHead>
+                  <TableHead>Exam</TableHead>
+                  <TableHead>CTA source</TableHead>
+                  <TableHead>Landing page</TableHead>
+                  <TableHead>Page</TableHead>
+                  <TableHead>Last query</TableHead>
+                  <TableHead>First instance date</TableHead>
+                  <TableHead>Date of registration</TableHead>
                   <TableHead>University</TableHead>
                   <TableHead className="cursor-pointer" onClick={() => toggleSort("status")}>
                     Status <SortIcon col="status" />
@@ -539,16 +581,21 @@ export function AllLeadsPage() {
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={31} className="text-center py-12 text-muted-foreground">
                       No leads found. Incoming generic API and campaign leads will appear here.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((lead) => (
+                  grouped.flatMap(({ key, items, latest, firstAt }) => {
+                    const shown = expanded.has(key) ? items : [latest];
+                    return shown.map((lead, index) => (
                     <TableRow key={lead.id} className="group hover:bg-muted/30">
                       <TableCell>
                         <Checkbox checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} />
                       </TableCell>
+                      <TableCell className="whitespace-nowrap">{index === 0 && items.length > 1 && <Button size="sm" variant="outline" onClick={() => setExpanded((current) => {
+                        const next = new Set(current); next.has(key) ? next.delete(key) : next.add(key); return next;
+                      })}>{expanded.has(key) ? <ChevronUp className="h-3 w-3 mr-1" /> : <ChevronDown className="h-3 w-3 mr-1" />}{items.length} submissions</Button>}</TableCell>
                       <TableCell className="font-medium">{lead.name}</TableCell>
                       <TableCell className="text-sm">{lead.email}</TableCell>
                       <TableCell className="font-mono text-sm">{lead.mobile}</TableCell>
@@ -559,6 +606,24 @@ export function AllLeadsPage() {
                       </TableCell>
                       <TableCell className="text-sm">{lead.campaign || "-"}</TableCell>
                       <TableCell className="text-sm">{lead.city || "-"}</TableCell>
+                      <TableCell>{field(lead, 'state')}</TableCell>
+                      <TableCell>{field(lead, 'utm_source', 'utmSource')}</TableCell>
+                      <TableCell>{field(lead, 'utm_medium', 'utmMedium')}</TableCell>
+                      <TableCell>{field(lead, 'utm_campaign', 'utmCampaign') !== '-' ? field(lead, 'utm_campaign', 'utmCampaign') : lead.campaign || '-'}</TableCell>
+                      <TableCell>{lead.course || field(lead, 'interest', 'program')}</TableCell>
+                      <TableCell>{field(lead, 'category')}</TableCell>
+                      <TableCell>{field(lead, 'device')}</TableCell>
+                      <TableCell>{field(lead, 'mode')}</TableCell>
+                      <TableCell>{field(lead, 'otp_verified', 'otpVerified')}</TableCell>
+                      <TableCell>{field(lead, 'consent')}</TableCell>
+                      <TableCell>{field(lead, 'campus')}</TableCell>
+                      <TableCell>{field(lead, 'exam')}</TableCell>
+                      <TableCell>{field(lead, 'cta_source', 'ctaSource')}</TableCell>
+                      <TableCell className="max-w-52 truncate">{field(lead, 'landing_page', 'landingPage')}</TableCell>
+                      <TableCell className="max-w-52 truncate">{field(lead, 'page', 'page_url', 'pageUrl')}</TableCell>
+                      <TableCell>{field(lead, 'last_query', 'lastQuery')}</TableCell>
+                      <TableCell className="whitespace-nowrap">{formatDate(firstAt)}</TableCell>
+                      <TableCell className="whitespace-nowrap">{field(lead, 'date_of_registration', 'registration_date') !== '-' ? field(lead, 'date_of_registration', 'registration_date') : formatDate(firstAt)}</TableCell>
                       <TableCell className="text-sm font-medium">{lead.university}</TableCell>
                       <TableCell>{statusBadge(lead.status)}</TableCell>
                       <TableCell className="text-xs text-destructive max-w-[150px] truncate">
@@ -593,7 +658,8 @@ export function AllLeadsPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
+                  ));
+                  })
                 )}
               </TableBody>
             </Table>
