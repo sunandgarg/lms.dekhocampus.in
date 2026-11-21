@@ -85,7 +85,7 @@ export function applyInboundFieldOverrides(leadData, payload, university, settin
       changed = true;
     }
     const transform = transforms.find((item) => item?.targetField === target && SAFE_FIELD.test(item.sourceField || '') &&
-      typeof item.equals === 'string' && item.equals.trim() && typeof item.value === 'string' && item.value.trim() &&
+      typeof item.equals === 'string' && typeof item.value === 'string' && item.value.trim() &&
       String(readPath(leadData, item.sourceField) ?? readPath(raw, item.sourceField) ?? '').trim().toLowerCase() === item.equals.trim().toLowerCase());
     const fallback = defaults.find((item) => item?.targetField === target && typeof item.value === 'string' && item.value.trim());
     const existing = readPath(leadData, sourceKey);

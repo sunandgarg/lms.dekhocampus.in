@@ -44,6 +44,15 @@ test('a route can correct one incoming field mapping without changing the integr
   assert.equal(JSON.parse(configured.column_mapping.__field_mobile).sourceKey, 'city');
 });
 
+test('an empty equals value matches blank or missing incoming fields only', () => {
+  const settings = { transforms: [{ sourceField: 'state', equals: '', targetField: 'program', value: 'Unknown state' }] };
+  for (const lead of [{ state: '' }, { state: '  ' }, {}]) {
+    const changed = applyInboundFieldOverrides(lead, lead, university, settings);
+    assert.equal(JSON.parse(changed.columnMapping.__field_course).staticValue, 'Unknown state');
+  }
+  assert.equal(applyInboundFieldOverrides({ state: 'Delhi' }, { state: 'Delhi' }, university, settings), null);
+});
+
 test('partner credentials stay hidden from team configuration while delivery retains them', () => {
   const stored = { __static_AccessKey: 'private', __field_key: JSON.stringify({ fieldName: 'AccessKey', sourceType: 'static', staticValue: 'private' }) };
   const visible = redactPartnerMapping(stored);
