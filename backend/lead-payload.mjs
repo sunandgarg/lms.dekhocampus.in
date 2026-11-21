@@ -53,6 +53,24 @@ function buildPayload(leadData, apiConfig) {
             leadDataWithDefaults[key] = defaultValue;
         }
     });
+    // The source lead stays untouched for the inbox and archives; only partner payloads use ten digits.
+    const tenDigitMobile = (value, label) => {
+        const digits = String(value).replace(/\D/g, "");
+        if (digits.length < 10) throw Object.assign(new Error(`Invalid mobile number in ${label}: need at least 10 digits`), { status: 400 });
+        return digits.slice(-10);
+    };
+    for (const [key, value] of Object.entries(staticFields)) {
+        if (value && /mobile|phone(?:.?number)?/i.test(key) && !/code/i.test(key))
+            staticFields[key] = tenDigitMobile(value, key);
+    }
+    for (const key of ["mobile", "phone.number", "phone", "phone_number", "mobile_number", "contact_number"]) {
+        if (!leadDataWithDefaults[key]) continue;
+        leadDataWithDefaults[key] = tenDigitMobile(leadDataWithDefaults[key], key);
+    }
+    for (const [source, target] of Object.entries(fieldMappings)) {
+        if (leadDataWithDefaults[source] && /mobile|phone(?:.?number)?/i.test(target) && !/code/i.test(target))
+            leadDataWithDefaults[source] = tenDigitMobile(leadDataWithDefaults[source], source);
+    }
     let payload;
     if (apiConfig.apiType === "upgrad") {
         const src = leadDataWithDefaults.leadSource || apiConfig.source || "";
@@ -199,7 +217,8 @@ function buildPayload(leadData, apiConfig) {
                 }
             }
             if (value || field.isRequired)
-                formPayload[field.fieldName] = value;
+                formPayload[field.fieldName] = value && /mobile|phone(?:.?number)?/i.test(field.fieldName)
+                    && !/code/i.test(field.fieldName) ? tenDigitMobile(value, field.fieldName) : value;
         });
         Object.entries(leadDataWithDefaults).forEach(([key, value]) => {
             if (value && !["leadSource", "leadMedium", "leadCampaign"].includes(key)) {

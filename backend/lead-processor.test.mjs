@@ -18,6 +18,21 @@ test('partner mappings retain Meritto fields and auth values', () => {
   assert.equal(payload.course, 'MBA');
 });
 
+test('partner payloads send ten mobile digits while the source lead remains original', () => {
+  const lead = { name: 'Alice', email: 'alice@example.com', mobile: '+91 98765 43210' };
+  const base = { apiUrl: 'https://partner.example.com/leads', columnMapping: {} };
+  assert.equal(buildPayload(lead, { ...base, apiType: 'generic' }).payload.mobile, '9876543210');
+  assert.equal(buildPayload(lead, { ...base, apiType: 'upgrad' }).payload.phone.number, '9876543210');
+  assert.equal(buildPayload({ ...lead, cell: '09876543210' }, {
+    ...base, apiType: 'generic', columnMapping: { cell: 'CandidateMobile' },
+  }).payload.CandidateMobile, '9876543210');
+  assert.equal(buildPayload({ ...lead, mobile: '' }, {
+    ...base, apiType: 'generic', columnMapping: { __static_CandidateMobile: '+91 98765 43210' },
+  }).payload.CandidateMobile, '9876543210');
+  assert.equal(lead.mobile, '+91 98765 43210');
+  assert.throws(() => buildPayload({ ...lead, mobile: '12345' }, { ...base, apiType: 'generic' }), /need at least 10 digits/);
+});
+
 test('partner response classification preserves duplicate and success signals', () => {
   assert.equal(categorizeResponse(409, '{"message":"already exists"}', false), 'Duplicate');
   assert.equal(categorizeResponse(200, '{"success":true}', true), 'Success');

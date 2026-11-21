@@ -208,6 +208,29 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
         return send(response, 200, { ids: data.filter((batch) =>
           !/^(API_|facebook_ads_|google_ads_|bing_ads_|LandingPage:)/i.test(batch.file_name || '')).map((batch) => batch.id) });
       }
+      if (url.pathname === '/api/functions/all-leads-deliveries' && method === 'POST') {
+        const ids = (await readJson(request)).lead_ids;
+        if (!Array.isArray(ids) || ids.length > 500 || ids.some((id) => typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))) {
+          return send(response, 400, { error: 'Choose up to 500 valid incoming leads' });
+        }
+        if (!ids.length) return send(response, 200, { deliveries: {} });
+        const { data: leads } = await executeRecords(db, { table: 'inbound_leads', select: 'id,batch_ids',
+          filters: [{ field: 'id', op: 'in', value: ids }, { field: 'deleted_at', op: 'is', value: null }], limit: ids.length });
+        const batchIds = [...new Set(leads.flatMap((lead) => Array.isArray(lead.batch_ids) ? lead.batch_ids : []))];
+        const batches = [];
+        for (let offset = 0; offset < batchIds.length; offset += 500) {
+          const { data } = await executeRecords(db, { table: 'upload_batches',
+            select: '*,universities(name)',
+            filters: [{ field: 'id', op: 'in', value: batchIds.slice(offset, offset + 500) }], limit: 500 });
+          batches.push(...data.map((batch) => ({ id: batch.id, status: batch.status,
+            success_count: batch.success_count, duplicate_count: batch.duplicate_count,
+            fail_count: batch.fail_count, error_message: batch.error_message,
+            universities: batch.universities })));
+        }
+        const byId = new Map(batches.map((batch) => [batch.id, batch]));
+        return send(response, 200, { deliveries: Object.fromEntries(leads.map((lead) => [lead.id,
+          (lead.batch_ids || []).map((id) => byId.get(id)).filter(Boolean)])) });
+      }
       if (url.pathname === '/api/functions/delete-leads' && method === 'POST') {
         requireAdmin(user);
         return send(response, 200, await hideLeads(db, user, (await readJson(request)).lead_ids));

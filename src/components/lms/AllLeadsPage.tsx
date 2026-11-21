@@ -19,6 +19,7 @@ export interface LmsLead {
   name: string;
   email: string;
   mobile: string;
+  originalMobile: string;
   city: string;
   course: string;
   specialization: string;
@@ -40,6 +41,50 @@ export interface LmsLead {
   extraData?: Record<string, string>;
   matchedRules?: string[];
   skippedDestinations?: number;
+  deliveries: LeadDelivery[];
+}
+
+interface LeadDelivery {
+  id: string;
+  status: string;
+  success_count?: number;
+  duplicate_count?: number;
+  fail_count?: number;
+  error_message?: string;
+  universities?: { name?: string };
+}
+
+function tenDigitMobile(value: string) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : '';
+}
+
+function deliveryResult(batch: LeadDelivery) {
+  if (Number(batch.success_count) > 0) return 'Pushed';
+  if (Number(batch.duplicate_count) > 0) return 'Duplicate';
+  if (Number(batch.fail_count) > 0 || ['failed', 'cancelled', 'paused', 'completed'].includes(String(batch.status).toLowerCase())) return 'Failed';
+  return 'Pending';
+}
+
+function fuzzyMatch(query: string, values: string[]) {
+  const text = values.join(' ').toLowerCase();
+  const words = text.match(/[a-z0-9]+/g) || [];
+  return query.toLowerCase().trim().split(/\s+/).every((term) => {
+    if (text.includes(term)) return true;
+    const allowed = term.length >= 8 ? 2 : term.length >= 4 ? 1 : 0;
+    if (!allowed) return false;
+    return words.some((word) => {
+      if (Math.abs(word.length - term.length) > allowed) return false;
+      let previous = Array.from({ length: word.length + 1 }, (_, index) => index);
+      for (let i = 1; i <= term.length; i++) {
+        const current = [i];
+        for (let j = 1; j <= word.length; j++) current[j] = Math.min(
+          current[j - 1] + 1, previous[j] + 1, previous[j - 1] + (term[i - 1] === word[j - 1] ? 0 : 1));
+        previous = current;
+      }
+      return previous[word.length] <= allowed;
+    });
+  });
 }
 
 function formatDate(iso: string) {
@@ -89,6 +134,7 @@ function downloadCSV(data: LmsLead[], filename: string) {
     "Name",
     "Email",
     "Mobile",
+    "Original Mobile",
     "City",
     "Course",
     "Source",
@@ -104,6 +150,7 @@ function downloadCSV(data: LmsLead[], filename: string) {
     l.name,
     l.email,
     l.mobile,
+    l.originalMobile,
     l.city,
     l.course,
     attributionSource(l),
@@ -162,7 +209,6 @@ export function AllLeadsPage() {
   const [segment, setSegment] = useState('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailLead, setDetailLead] = useState<LmsLead | null>(null);
-  const [routeBatches, setRouteBatches] = useState<any[]>([]);
   const [showFilters, setShowFilters] = useState(true);
   const [sortCol, setSortCol] = useState<string>("receivedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -195,6 +241,14 @@ export function AllLeadsPage() {
         const { data: excludedBatches, error: batchError } = await api.functions.invoke('all-leads-excluded-batches');
         if (batchError) throw batchError;
         const excludeBatchIds: string[] = excludedBatches?.ids || [];
+        const deliveries: Record<string, LeadDelivery[]> = {};
+        for (let offset = 0; offset < inboundData.length; offset += 500) {
+          const { data, error } = await api.functions.invoke('all-leads-deliveries', {
+            body: { lead_ids: inboundData.slice(offset, offset + 500).map((lead) => lead.id) },
+          });
+          if (error) throw error;
+          Object.assign(deliveries, data.deliveries);
+        }
 
         const leadsData: any[] = [];
         let existingHasMore = false;
@@ -213,7 +267,7 @@ export function AllLeadsPage() {
           id: l.id,
           name: l.name || "",
           email: l.email || "",
-          mobile: l.mobile || "",
+          mobile: tenDigitMobile(l.mobile || ""), originalMobile: l.mobile || "",
           city: l.city || "",
           course: l.course || "",
           specialization: l.specialization || "",
@@ -229,10 +283,14 @@ export function AllLeadsPage() {
           retryCount: l.retry_count || 0,
           batchId: l.batch_id,
           triggerSource: l.lead_source || "Unknown",
+          deliveries: [{ id: l.batch_id || l.id, status: l.status, success_count: l.status === 'Success' ? 1 : 0,
+            duplicate_count: l.status === 'Duplicate' ? 1 : 0, fail_count: ['Fail', 'failed'].includes(l.status) ? 1 : 0,
+            universities: { name: l.universities?.name || 'University' } }],
         }));
 
         const incoming: LmsLead[] = (inboundData || []).map((lead: any) => ({
-          id: lead.id, name: lead.name || '', email: lead.email || '', mobile: lead.mobile || '',
+          id: lead.id, name: lead.name || '', email: lead.email || '',
+          mobile: tenDigitMobile(lead.mobile || ''), originalMobile: lead.mobile || '',
           city: lead.city || '', course: lead.course || '', specialization: '',
           source: lead.source || lead.connection_name || 'Generic API', campaign: lead.campaign || '',
           medium: lead.extra_data?.utm_medium || lead.extra_data?.lead_medium || lead.extra_data?.medium || '',
@@ -244,6 +302,7 @@ export function AllLeadsPage() {
           extraData: lead.extra_data || {},
           matchedRules: lead.matched_rules || [],
           skippedDestinations: lead.skipped_destinations || 0,
+          deliveries: deliveries[lead.id] || [],
         }));
         setLeads([...incoming, ...mapped].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)));
         setHasMore(inboundHasMore || existingHasMore);
@@ -261,13 +320,6 @@ export function AllLeadsPage() {
     fetchLeads();
   }, [fetchLeads]);
 
-  useEffect(() => {
-    setRouteBatches([]);
-    if (!detailLead?.batchIds?.length) return;
-    api.from('upload_batches').select('id,status,success_count,duplicate_count,fail_count,error_message,universities(name)')
-      .in('id', detailLead.batchIds).then(({ data }) => setRouteBatches(data || []));
-  }, [detailLead]);
-
   const repeatKeys = useMemo(() => {
     const counts = new Map<string, number>();
     for (const lead of leads.filter((item) => item.isInbound)) {
@@ -279,17 +331,20 @@ export function AllLeadsPage() {
 
   const filtered = useMemo(() => {
     const result = leads.filter((l) => {
-      const q = search.toLowerCase();
-      if (q && ![l.name, l.email, l.mobile, l.campaign, attributionSource(l), l.medium, leadCourse(l), l.city]
-        .some((value) => String(value || '').toLowerCase().includes(q)))
+      if (search.trim() && !fuzzyMatch(search, [l.name, l.email, l.mobile, l.originalMobile, l.campaign,
+        attributionSource(l), l.medium, leadCourse(l), l.city, leadState(l), l.university, l.status,
+        l.triggerSource, ...Object.entries(l.extraData || {}).flat(),
+        ...l.deliveries.flatMap((batch) => [batch.universities?.name || '', deliveryResult(batch)])]))
         return false;
       if (segment === 'repeat' ? !repeatKeys.has(leadIdentity(l)) : segment !== 'all' && leadChannel(l) !== segment) return false;
-      if (statusFilter !== "all" && l.status !== statusFilter) return false;
+      if (statusFilter !== "all" && l.status !== statusFilter &&
+          !l.deliveries.some((batch) => deliveryResult(batch) === statusFilter)) return false;
       if (sourceFilter !== "all" && attributionSource(l) !== sourceFilter) return false;
       if (mediumFilter !== 'all' && l.medium !== mediumFilter) return false;
       if (campaignFilter && !l.campaign.toLowerCase().includes(campaignFilter.toLowerCase())) return false;
       if (courseFilter !== 'all' && leadCourse(l) !== courseFilter) return false;
-      if (universityFilter !== "all" && l.university !== universityFilter) return false;
+      if (universityFilter !== "all" && l.university !== universityFilter &&
+          !l.deliveries.some((batch) => batch.universities?.name === universityFilter)) return false;
       if (cityFilter !== "all" && l.city !== cityFilter) return false;
       if (stateFilter !== 'all' && leadState(l) !== stateFilter) return false;
       if (contactFilter === 'both' && (!l.email || !l.mobile)) return false;
@@ -339,7 +394,8 @@ export function AllLeadsPage() {
   const sources = useMemo(() => [...new Set(leads.map(attributionSource).filter((value) => value !== '-'))], [leads]);
   const media = useMemo(() => [...new Set(leads.map((lead) => lead.medium).filter(Boolean))], [leads]);
   const courses = useMemo(() => [...new Set(leads.map(leadCourse).filter(Boolean))], [leads]);
-  const universities = useMemo(() => [...new Set(leads.map((l) => l.university).filter(Boolean))], [leads]);
+  const universities = useMemo(() => [...new Set(leads.flatMap((lead) =>
+    lead.deliveries.map((batch) => batch.universities?.name || '').filter(Boolean)))], [leads]);
   const cities = useMemo(() => [...new Set(leads.map((l) => l.city).filter(Boolean))], [leads]);
   const states = useMemo(() => [...new Set(leads.map(leadState).filter(Boolean))], [leads]);
 
@@ -422,6 +478,26 @@ export function AllLeadsPage() {
       Received: "badge-info",
     };
     return <span className={map[s] || "badge-info"}>{s}</span>;
+  };
+
+  const deliveryBadges = (lead: LmsLead, history?: LmsLead[]) => {
+    const deliveries = history ? [...new Map(history.flatMap((item) => item.deliveries)
+      .reverse().map((batch) => [batch.universities?.name || batch.id, batch])).values()] : lead.deliveries;
+    return deliveries.length ? (
+    <div className="flex max-w-[320px] flex-wrap gap-1.5" aria-label="University delivery results">
+      {deliveries.map((batch) => {
+        const result = deliveryResult(batch);
+        const color = result === 'Pushed' ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+          : result === 'Pending' ? 'border-amber-300 bg-amber-50 text-amber-900'
+            : 'border-red-300 bg-red-50 font-bold text-red-800';
+        return <span key={batch.id} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${color}`}
+          title={batch.error_message || `${batch.universities?.name || 'University'}: ${result}`}>
+          <span aria-hidden="true" className={`h-2 w-2 rounded-full ${result === 'Pushed' ? 'bg-emerald-600' : result === 'Pending' ? 'bg-amber-500' : 'bg-red-600'}`} />
+          <span>{batch.universities?.name || 'University'}</span><strong>{result}</strong>
+        </span>;
+      })}
+    </div>
+  ) : <span className="text-xs font-medium text-muted-foreground">Inbox only · no university push</span>;
   };
 
   const SortIcon = ({ col }: { col: string }) =>
@@ -516,14 +592,12 @@ export function AllLeadsPage() {
               <span>{label}</span><span className="rounded-md bg-background px-2 py-0.5 font-semibold tabular-nums text-foreground">{count}</span>
             </button>)}
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input aria-label="Search leads" placeholder="Search student, mobile, email, campaign or course" value={search} onChange={(e) => setSearch(e.target.value)} className="h-11 pl-10 text-base" />
-            </div>
-            <div className="flex flex-wrap gap-1" aria-label="Filter by delivery status">
+          <div className="relative"><Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+            <Input aria-label="Search anything in leads" placeholder="Search anything: name, email, mobile, campaign, city, university or status" value={search} onChange={(e) => setSearch(e.target.value)} className="h-12 rounded-lg border-primary/30 bg-background pl-12 text-base shadow-sm" />
+          </div>
+          <div className="flex flex-wrap gap-1" aria-label="Filter by delivery status">
               {[['all','All'],['Received','Received'],['Failed','Needs attention'],['Pushed','Pushed']].map(([value,label]) =>
                 <Button key={value} size="sm" variant={statusFilter === value ? 'default' : 'ghost'} onClick={() => setStatusFilter(value)}>{label}</Button>)}
-            </div>
           </div>
           {showFilters && <div className="rounded-xl border bg-muted/25 p-3 md:p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold">Refine your lead list</p>
@@ -585,12 +659,12 @@ export function AllLeadsPage() {
                   {isAdmin && <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>}
                   <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button></TableCell>
                   <TableCell className="max-w-[220px] truncate align-top text-base" title={lead.email}>{lead.email || '-'}</TableCell>
-                  <TableCell className="whitespace-nowrap align-top text-base">{lead.mobile || '-'}</TableCell>
+                  <TableCell className="whitespace-nowrap align-top text-base tabular-nums">{lead.mobile || '-'}</TableCell>
                   <TableCell className="align-top"><Badge variant="outline" className="max-w-[150px] truncate">{attributionSource(lead)}</Badge></TableCell>
                   <TableCell className="align-top text-base">{lead.medium || field(lead,'utm_medium','utmMedium')}</TableCell>
                   <TableCell className="max-w-[200px] truncate align-top text-base" title={lead.campaign}>{lead.campaign || field(lead,'utm_campaign','utmCampaign')}</TableCell>
                   <TableCell className="whitespace-nowrap align-top"><div className="text-base font-medium tabular-nums">{formatDate(lead.receivedAt)}</div><div className="mt-1 text-xs text-muted-foreground">{index > 0 ? 'Earlier submission' : 'Most recent'}</div></TableCell>
-                  <TableCell className="align-top"><div className="flex flex-wrap items-center gap-2">{statusBadge(lead.status)}<span className="max-w-[170px] truncate text-xs text-muted-foreground" title={lead.university}>{lead.university}</span></div>
+                  <TableCell className="align-top">{deliveryBadges(lead, index === 0 ? items : undefined)}
                     {lead.failReason && <p className="mt-1 max-w-[240px] truncate text-xs text-destructive" title={lead.failReason}>{lead.failReason}</p>}</TableCell>
                   <TableCell className="align-top">{index === 0 && items.length > 1 ? <button type="button" aria-expanded={expanded.has(key)} aria-label={`${expanded.has(key) ? 'Collapse' : 'Expand'} ${items.length} submissions for ${lead.name || 'this contact'}`}
                     className="inline-flex min-h-9 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>
@@ -622,7 +696,7 @@ export function AllLeadsPage() {
                 <div className="flex flex-wrap items-center gap-2">{statusBadge(detailLead.status)}<span className="text-xs text-muted-foreground">Received {formatDate(detailLead.receivedAt)}</span></div>
                 <section className="space-y-3"><h3 className="border-b pb-2 text-sm font-semibold">Student and contact</h3>
                   <dl className="grid grid-cols-2 gap-3">{[
-                    ['Email', detailLead.email], ['Mobile', detailLead.mobile], ['City', detailLead.city], ['State', field(detailLead,'state')],
+                    ['Email', detailLead.email], ['Mobile (10 digits)', detailLead.mobile], ['Original mobile', detailLead.originalMobile], ['City', detailLead.city], ['State', field(detailLead,'state')],
                     ['Course / interest', detailLead.course || field(detailLead,'interest','program')], ['Specialization', detailLead.specialization],
                     ['Campus', field(detailLead,'campus')], ['Exam', field(detailLead,'exam')], ['Mode', field(detailLead,'mode')], ['Category', field(detailLead,'category')],
                   ].map(([label,value]) => detailField(detailLead,label,value))}</dl>
@@ -645,6 +719,7 @@ export function AllLeadsPage() {
                   ].map(([label,value]) => detailField(detailLead,label,value === '-' ? '' : value))}</dl>
                 </section>
                 <section className="space-y-3"><h3 className="border-b pb-2 text-sm font-semibold">Delivery</h3>
+                  {deliveryBadges(detailLead)}
                   <dl className="grid grid-cols-2 gap-3">{[
                     ['Destination',detailLead.university],['Status',detailLead.status],['Retry count',detailLead.retryCount],
                   ].map(([label,value]) => detailField(detailLead,label,value))}</dl>
@@ -664,9 +739,8 @@ export function AllLeadsPage() {
                   {!!detailLead.matchedRules?.length && <p className="text-xs text-muted-foreground">Matched rules: {detailLead.matchedRules.join(', ')}</p>}
                   {!!detailLead.skippedDestinations && <p className="text-xs text-destructive">{detailLead.skippedDestinations} destination was removed before this lead arrived. Update the automation rule.</p>}
                   {detailLead.destinationCount === 0 ? <p className="text-xs text-muted-foreground">Collect only — no automatic push configured.</p>
-                    : routeBatches.length === 0 ? <p className="text-xs text-muted-foreground">Loading delivery status...</p>
-                    : routeBatches.map((batch) => <div key={batch.id} className="text-sm border rounded p-2">
-                      <span className="font-medium">{batch.universities?.name || 'University'}</span>: {batch.status}
+                    : detailLead.deliveries.map((batch) => <div key={batch.id} className="text-sm border rounded p-2">
+                      <span className="font-medium">{batch.universities?.name || 'University'}</span>: {deliveryResult(batch)}
                       {batch.error_message && <p className="text-xs text-destructive">{batch.error_message}</p>}
                     </div>)}
                 </div>}
