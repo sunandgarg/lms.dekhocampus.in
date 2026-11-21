@@ -23,6 +23,7 @@ interface LeadPreviewTableProps {
   leadStatuses?: Map<number, "pending" | "success" | "failed" | "duplicate">;
   leadResponses?: Map<number, string>;
   leadPayloads?: Map<number, string>;
+  csvColumnMapping?: Record<string, string>;
   validationErrors?: Map<number, string[]>;
   dbDuplicates?: Set<number>;
   onRetry?: (index: number) => void;
@@ -37,6 +38,7 @@ export function LeadPreviewTable({
   leadStatuses = new Map(),
   leadResponses = new Map(),
   leadPayloads = new Map(),
+  csvColumnMapping = {},
   validationErrors = new Map(),
   dbDuplicates = new Set(),
   onRetry,
@@ -137,6 +139,34 @@ export function LeadPreviewTable({
       return safeResponse.substring(0, 30) + (safeResponse.length > 30 ? "..." : "");
     }
   };
+
+  const renderPayloadDetails = (lead: Lead, index: number) => (
+    <div className="space-y-3">
+      <div>
+        <p className="font-medium text-foreground mb-1 text-xs">Mapped CSV columns (including blank values)</p>
+        <pre className="bg-background p-3 rounded-lg overflow-x-auto font-mono text-xs text-foreground whitespace-pre-wrap">
+          {JSON.stringify(
+            Object.keys(csvColumnMapping).length
+              ? Object.fromEntries(Object.entries(csvColumnMapping)
+                  .filter(([, target]) => target)
+                  .map(([header, target]) => [header, lead[target] ?? ""]))
+              : lead,
+            null,
+            2,
+          )}
+        </pre>
+      </div>
+      <div>
+        <p className="font-medium text-foreground mb-1 text-xs">Outgoing university API request</p>
+        <pre className="bg-background p-3 rounded-lg overflow-x-auto font-mono text-xs text-foreground whitespace-pre-wrap">
+          {formatResponse(leadPayloads.get(index) || "")}
+        </pre>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Only fields configured in this university’s API integration are sent. Other mapped fields stay in the lead and its archived CSV.
+        </p>
+      </div>
+    </div>
+  );
 
   const startEditing = (index: number) => {
     setEditingRow(index);
@@ -443,12 +473,7 @@ export function LeadPreviewTable({
                       </ul>
 
                       {leadPayloads.has(actualIndex) && (
-                        <>
-                          <p className="font-medium text-muted-foreground mt-4 mb-2 text-xs">Mapped Payload (JSON):</p>
-                          <pre className="bg-background p-3 rounded-lg overflow-x-auto font-mono text-xs text-foreground whitespace-pre-wrap">
-                            {formatResponse(leadPayloads.get(actualIndex) || "")}
-                          </pre>
-                        </>
+                        <div className="mt-4">{renderPayloadDetails(lead, actualIndex)}</div>
                       )}
                     </td>
                   </tr>
@@ -461,12 +486,7 @@ export function LeadPreviewTable({
                     <tr className="bg-muted/20">
                       <td colSpan={colSpan} className="px-3 py-3 space-y-4">
                         {leadPayloads.has(actualIndex) && (
-                          <div>
-                            <p className="font-medium text-muted-foreground mb-2 text-xs">Mapped Payload (JSON):</p>
-                            <pre className="bg-background p-3 rounded-lg overflow-x-auto font-mono text-xs text-foreground whitespace-pre-wrap">
-                              {formatResponse(leadPayloads.get(actualIndex) || "")}
-                            </pre>
-                          </div>
+                          renderPayloadDetails(lead, actualIndex)
                         )}
 
                         {showStatus && leadResponses.has(actualIndex) && (

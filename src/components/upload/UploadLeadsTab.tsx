@@ -2528,6 +2528,7 @@ export function UploadLeadsTab({
                 leadStatuses={leadStatuses}
                 leadResponses={leadResponses}
                 leadPayloads={leadPayloads}
+                csvColumnMapping={tempColumnMapping}
                 validationErrors={validationErrors}
                 dbDuplicates={dbDuplicates}
                 onUpdateLead={!isProcessing ? handleUpdateLead : undefined}
@@ -2740,7 +2741,7 @@ export function UploadLeadsTab({
             <div className="p-6 border-b border-border">
               <h2 className="font-display text-xl font-bold text-foreground">Map CSV Columns</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Match your CSV columns to the correct lead fields. Each field can only be used once.
+                Match CSV columns to lead fields. Every mapped value is captured; only fields configured in this university’s API integration are sent. Each field can only be used once.
               </p>
               <p className="mt-3 text-xs text-muted-foreground">The server sends one lead at a time at the rate selected for this run.</p>
             </div>
@@ -2836,7 +2837,7 @@ export function UploadLeadsTab({
                 // React option rendering inside the mapping modal.
                 const allOptions = [...new Map([...standardOptions, ...customColOptions].map((opt) => [opt.value, opt])).values()];
                 const optionValues = new Set(allOptions.map((option) => option.value));
-                if (!optionValues.has(header)) allOptions.push({ value: header, label: `${header} (CSV column)` });
+                if (!optionValues.has(header)) allOptions.push({ value: header, label: `${header} (captured only)` });
                 const selectedValue = localColumnMapping[header];
                 if (selectedValue && !optionValues.has(selectedValue) && selectedValue !== header) {
                   allOptions.push({ value: selectedValue, label: selectedValue });
