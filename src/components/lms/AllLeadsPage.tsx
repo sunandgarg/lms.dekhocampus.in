@@ -6,13 +6,15 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, Users, X, Trash2 } from "lucide-react";
+import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, Users, X, Trash2, CheckCircle2, XCircle, Clock3 } from "lucide-react";
 import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
+import { deliveryResult, summarizeDeliveries, type LeadDelivery } from './delivery-summary';
 
 export interface LmsLead {
   id: string;
@@ -44,26 +46,9 @@ export interface LmsLead {
   deliveries: LeadDelivery[];
 }
 
-interface LeadDelivery {
-  id: string;
-  status: string;
-  success_count?: number;
-  duplicate_count?: number;
-  fail_count?: number;
-  error_message?: string;
-  universities?: { name?: string };
-}
-
 function tenDigitMobile(value: string) {
   const digits = String(value || '').replace(/\D/g, '');
   return digits.length >= 10 ? digits.slice(-10) : '';
-}
-
-function deliveryResult(batch: LeadDelivery) {
-  if (Number(batch.success_count) > 0) return 'Pushed';
-  if (Number(batch.duplicate_count) > 0) return 'Duplicate';
-  if (Number(batch.fail_count) > 0 || ['failed', 'cancelled', 'paused', 'completed'].includes(String(batch.status).toLowerCase())) return 'Failed';
-  return 'Pending';
 }
 
 function fuzzyMatch(query: string, values: string[]) {
@@ -480,24 +465,57 @@ export function AllLeadsPage() {
     return <span className={map[s] || "badge-info"}>{s}</span>;
   };
 
-  const deliveryBadges = (lead: LmsLead, history?: LmsLead[]) => {
-    const deliveries = history ? [...new Map(history.flatMap((item) => item.deliveries)
-      .reverse().map((batch) => [batch.universities?.name || batch.id, batch])).values()] : lead.deliveries;
-    return deliveries.length ? (
-    <div className="flex max-w-[320px] flex-wrap gap-1.5" aria-label="University delivery results">
+  const deliveryList = (deliveries: LeadDelivery[]) => deliveries.length ? (
+    <div className="max-h-80 divide-y overflow-y-auto">
       {deliveries.map((batch) => {
         const result = deliveryResult(batch);
-        const color = result === 'Pushed' ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-          : result === 'Pending' ? 'border-amber-300 bg-amber-50 text-amber-900'
-            : 'border-red-300 bg-red-50 font-bold text-red-800';
-        return <span key={batch.id} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${color}`}
-          title={batch.error_message || `${batch.universities?.name || 'University'}: ${result}`}>
-          <span aria-hidden="true" className={`h-2 w-2 rounded-full ${result === 'Pushed' ? 'bg-emerald-600' : result === 'Pending' ? 'bg-amber-500' : 'bg-red-600'}`} />
-          <span>{batch.universities?.name || 'University'}</span><strong>{result}</strong>
-        </span>;
+        const Icon = result === 'Pushed' ? CheckCircle2 : result === 'Pending' ? Clock3 : XCircle;
+        const color = result === 'Pushed' ? 'text-emerald-700' : result === 'Pending' ? 'text-amber-700' : 'text-red-700';
+        return <div key={batch.id} className="flex gap-3 px-4 py-3">
+          <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${color}`} aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2 text-sm">
+              <strong className="break-words text-foreground">{batch.universities?.name || 'University'}</strong>
+              <span className={`shrink-0 font-semibold ${color}`}>{result}</span>
+            </div>
+            {batch.error_message && <p className="mt-1 break-words text-xs text-muted-foreground">{batch.error_message}</p>}
+          </div>
+        </div>;
       })}
     </div>
-  ) : <span className="text-xs font-medium text-muted-foreground">Inbox only · no university push</span>;
+  ) : <p className="px-4 py-4 text-sm text-muted-foreground">No university push was configured for this lead.</p>;
+
+  const deliveryBattery = (history: LmsLead[]) => {
+    const { deliveries, pushed, notPushed, pending } = summarizeDeliveries(history);
+    const total = deliveries.length;
+    return <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label={`View university deliveries: ${pushed} pushed, ${notPushed} not pushed, ${pending} pending`}
+          className="group w-[216px] rounded-xl border bg-background px-3 py-2.5 text-left shadow-sm transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <span className="flex items-center justify-between gap-2 text-xs font-semibold text-foreground">
+            <span>{total ? `${pushed} of ${total} pushed` : 'Inbox only'}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
+          </span>
+          <span className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-slate-200" aria-hidden="true">
+            {pushed > 0 && <span className="bg-emerald-500" style={{ flex: pushed }} />}
+            {notPushed > 0 && <span className="bg-red-500" style={{ flex: notPushed }} />}
+            {pending > 0 && <span className="bg-amber-400" style={{ flex: pending }} />}
+          </span>
+          <span className="mt-2 flex items-center justify-between gap-1 text-[11px] font-semibold tabular-nums">
+            <span className="text-emerald-700">● {pushed} green</span>
+            <span className="text-red-700">● {notPushed} red</span>
+            <span className="text-amber-700">● {pending} yellow</span>
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="left" align="start" className="w-80 overflow-hidden p-0 shadow-xl">
+        <div className="border-b px-4 py-3">
+          <p className="font-semibold">University deliveries</p>
+          <p className="text-xs text-muted-foreground">{total ? `${total} universit${total === 1 ? 'y' : 'ies'} · latest result for each` : 'No destinations selected'}</p>
+        </div>
+        {deliveryList(deliveries)}
+      </PopoverContent>
+    </Popover>;
   };
 
   const SortIcon = ({ col }: { col: string }) =>
@@ -664,7 +682,7 @@ export function AllLeadsPage() {
                   <TableCell className="align-top text-base">{lead.medium || field(lead,'utm_medium','utmMedium')}</TableCell>
                   <TableCell className="max-w-[200px] truncate align-top text-base" title={lead.campaign}>{lead.campaign || field(lead,'utm_campaign','utmCampaign')}</TableCell>
                   <TableCell className="whitespace-nowrap align-top"><div className="text-base font-medium tabular-nums">{formatDate(lead.receivedAt)}</div><div className="mt-1 text-xs text-muted-foreground">{index > 0 ? 'Earlier submission' : 'Most recent'}</div></TableCell>
-                  <TableCell className="align-top">{deliveryBadges(lead, index === 0 ? items : undefined)}
+                  <TableCell className="align-top">{deliveryBattery(index === 0 ? items : [lead])}
                     {lead.failReason && <p className="mt-1 max-w-[240px] truncate text-xs text-destructive" title={lead.failReason}>{lead.failReason}</p>}</TableCell>
                   <TableCell className="align-top">{index === 0 && items.length > 1 ? <button type="button" aria-expanded={expanded.has(key)} aria-label={`${expanded.has(key) ? 'Collapse' : 'Expand'} ${items.length} submissions for ${lead.name || 'this contact'}`}
                     className="inline-flex min-h-9 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>
@@ -719,7 +737,7 @@ export function AllLeadsPage() {
                   ].map(([label,value]) => detailField(detailLead,label,value === '-' ? '' : value))}</dl>
                 </section>
                 <section className="space-y-3"><h3 className="border-b pb-2 text-sm font-semibold">Delivery</h3>
-                  {deliveryBadges(detailLead)}
+                  <div className="overflow-hidden rounded-xl border">{deliveryList(detailLead.deliveries)}</div>
                   <dl className="grid grid-cols-2 gap-3">{[
                     ['Destination',detailLead.university],['Status',detailLead.status],['Retry count',detailLead.retryCount],
                   ].map(([label,value]) => detailField(detailLead,label,value))}</dl>
@@ -735,14 +753,9 @@ export function AllLeadsPage() {
                   {isAdmin && <Button asChild variant="outline" size="sm"><a href={`/api/inbound/generic-leads/${detailLead.id}/archive.zip`}>
                     <Download className="h-4 w-4 mr-2" /> Download incoming payload ZIP
                   </a></Button>}
-                  <p className="text-sm font-medium">Auto-push destinations</p>
+                  <p className="text-sm font-medium">Auto-push routing</p>
                   {!!detailLead.matchedRules?.length && <p className="text-xs text-muted-foreground">Matched rules: {detailLead.matchedRules.join(', ')}</p>}
                   {!!detailLead.skippedDestinations && <p className="text-xs text-destructive">{detailLead.skippedDestinations} destination was removed before this lead arrived. Update the automation rule.</p>}
-                  {detailLead.destinationCount === 0 ? <p className="text-xs text-muted-foreground">Collect only — no automatic push configured.</p>
-                    : detailLead.deliveries.map((batch) => <div key={batch.id} className="text-sm border rounded p-2">
-                      <span className="font-medium">{batch.universities?.name || 'University'}</span>: {deliveryResult(batch)}
-                      {batch.error_message && <p className="text-xs text-destructive">{batch.error_message}</p>}
-                    </div>)}
                 </div>}
 
                 {detailLead.extraData && Object.keys(detailLead.extraData).length > 0 && <section className="space-y-3 border-t pt-4">
