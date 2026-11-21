@@ -122,10 +122,10 @@ function buildPayload(leadData, apiConfig) {
         const rawMobileInput = (readField("mobile", "phone.number") || "").trim();
         let phoneCode = (leadDataWithDefaults["phone.code"] || leadDataWithDefaults["phone.countryCode"] || "+91").trim() || "+91";
         let phoneNumber = rawMobileInput.replace(/\D/g, "");
-        const plusMatch = rawMobileInput.match(/^\+(\d{1,3})/);
-        if (plusMatch) {
-            phoneCode = `+${plusMatch[1]}`;
-            phoneNumber = phoneNumber.slice(plusMatch[1].length);
+        const originalMobile = String(leadData[upgradSrcMap.mobile] || leadData["phone.number"] || leadData.mobile || "");
+        const originalDigits = originalMobile.replace(/\D/g, "");
+        if (originalMobile.trim().startsWith("+") && originalDigits.length > 10) {
+            phoneCode = `+${originalDigits.slice(0, -10)}`;
         }
         else if (phoneNumber.length === 12 && phoneNumber.startsWith("91")) {
             phoneNumber = phoneNumber.slice(2);

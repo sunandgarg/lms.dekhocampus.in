@@ -23,6 +23,8 @@ test('partner payloads send ten mobile digits while the source lead remains orig
   const base = { apiUrl: 'https://partner.example.com/leads', columnMapping: {} };
   assert.equal(buildPayload(lead, { ...base, apiType: 'generic' }).payload.mobile, '9876543210');
   assert.equal(buildPayload(lead, { ...base, apiType: 'upgrad' }).payload.phone.number, '9876543210');
+  assert.deepEqual(buildPayload({ ...lead, mobile: '+1 9876543210' }, { ...base, apiType: 'upgrad' }).payload.phone,
+    { number: '9876543210', code: '+1' });
   assert.equal(buildPayload({ ...lead, cell: '09876543210' }, {
     ...base, apiType: 'generic', columnMapping: { cell: 'CandidateMobile' },
   }).payload.CandidateMobile, '9876543210');
