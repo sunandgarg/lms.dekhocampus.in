@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, Users, X } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, Users, X, Trash2 } from "lucide-react";
 import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
@@ -140,6 +141,8 @@ function mapStatus(s: string | null): string {
 
 export function AllLeadsPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const [leads, setLeads] = useState<LmsLead[]>([]);
   const [pageCount, setPageCount] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -174,7 +177,7 @@ export function AllLeadsPage() {
         let inboundHasMore = false;
         for (let page = 0; page < pageCount; page++) {
           const { data, error } = await api.from('inbound_leads')
-            .select('*').order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
+            .select('*').is('deleted_at', null).order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
           if (error && error.status !== 403) throw error;
           if (error) break;
           inboundData.push(...(data || []));
@@ -189,21 +192,15 @@ export function AllLeadsPage() {
         // Fetch leads that are NOT from CSV upload batches
         // CSV upload batches have file_name like actual filenames (*.csv)
         // External API leads have file_name like 'API_*'
-        const { data: uploadBatches, error: batchError } = await api
-          .from("upload_batches")
-          .select("id,file_name")
-          .order('created_at', { ascending: false }).limit(1000);
+        const { data: excludedBatches, error: batchError } = await api.functions.invoke('all-leads-excluded-batches');
         if (batchError) throw batchError;
-
-        const excludeBatchIds = (uploadBatches || [])
-          .filter((batch) => !/^(API_|facebook_ads_|google_ads_|bing_ads_|LandingPage:)/i.test(batch.file_name || ''))
-          .map((batch) => batch.id);
+        const excludeBatchIds: string[] = excludedBatches?.ids || [];
 
         const leadsData: any[] = [];
         let existingHasMore = false;
         for (let page = 0; page < pageCount; page++) {
           let query = api.from('leads').select('*, universities(name)')
-            .order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
+            .is('deleted_at', null).order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
           if (excludeBatchIds.length > 0) query = query.not('batch_id', 'in', `(${excludeBatchIds.join(',')})`);
           const { data, error } = await query;
           if (error) throw error;
@@ -402,6 +399,19 @@ export function AllLeadsPage() {
     }
   }, [selectedIds, leads, toast, fetchLeads]);
 
+  const handleDeleteLeads = useCallback(async (ids: string[]) => {
+    if (!isAdmin || !ids.length || !window.confirm(
+      `Delete ${ids.length} lead submission${ids.length === 1 ? '' : 's'} from All Leads? Other submissions for the same contact, delivery history, and S3 archives will remain.`)) return;
+    const { data, error } = await api.functions.invoke('delete-leads', { body: { lead_ids: ids } });
+    if (error) toast({ title: 'Could not delete leads', description: error.message, variant: 'destructive' });
+    else {
+      toast({ title: `${data.deleted} lead${data.deleted === 1 ? '' : 's'} deleted from All Leads` });
+      setSelectedIds(new Set());
+      setDetailLead(null);
+      fetchLeads(true);
+    }
+  }, [isAdmin, toast, fetchLeads]);
+
   const statusBadge = (s: string) => {
     const map: Record<string, string> = {
       Pushed: "badge-success",
@@ -453,16 +463,16 @@ export function AllLeadsPage() {
           <p className="mt-2 max-w-2xl text-base text-muted-foreground">Find the right student by campaign, course, location or delivery status. Repeat enquiries stay together in their history.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowAutomation(!showAutomation)} aria-expanded={showAutomation}>
+          {isAdmin && <Button variant="outline" size="sm" onClick={() => setShowAutomation(!showAutomation)} aria-expanded={showAutomation}>
             <Zap className="mr-2 h-4 w-4" /> Lead push automation {showAutomation ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
-          </Button>
+          </Button>}
           <Button variant="outline" size="sm" onClick={() => fetchLeads(true)} disabled={loading}>
             <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </Button>
         </div>
       </div>
 
-      {showAutomation && <LeadAutomationSettings incomingExtraFields={[...new Set(leads
+      {isAdmin && showAutomation && <LeadAutomationSettings incomingExtraFields={[...new Set(leads
         .filter((lead) => lead.isInbound)
         .flatMap((lead) => Object.keys(lead.extraData || {})))].sort()} />}
 
@@ -489,9 +499,9 @@ export function AllLeadsPage() {
               <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} aria-expanded={showFilters}>
                 <Filter className="mr-2 h-4 w-4" /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => downloadCSV(grouped.map((group) => group.latest), 'lead-inbox-view.csv')} disabled={!grouped.length}>
+              {isAdmin && <Button variant="outline" size="sm" onClick={() => downloadCSV(grouped.map((group) => group.latest), 'lead-inbox-view.csv')} disabled={!grouped.length}>
                 <Download className="mr-2 h-4 w-4" /> Export leads
-              </Button>
+              </Button>}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 border-b pb-3 sm:grid-cols-3 xl:grid-cols-5" aria-label="Lead groups">
@@ -543,10 +553,11 @@ export function AllLeadsPage() {
           </div>}
         </div>
 
-        {selectedIds.size > 0 && <div className="flex flex-wrap items-center gap-2 border-b bg-primary/5 px-4 py-2 text-sm">
+        {isAdmin && selectedIds.size > 0 && <div className="flex flex-wrap items-center gap-2 border-b bg-primary/5 px-4 py-2 text-sm">
           <strong>{selectedIds.size} selected</strong>
           <Button size="sm" variant="outline" onClick={handleBulkRetry}><RefreshCw className="mr-1 h-3.5 w-3.5" /> Retry failed</Button>
           <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), 'selected-leads.csv')}><Download className="mr-1 h-3.5 w-3.5" /> Export selected</Button>
+          <Button size="sm" variant="destructive" disabled={selectedIds.size > 100} onClick={() => handleDeleteLeads([...selectedIds])}><Trash2 className="mr-1 h-3.5 w-3.5" /> Delete selected{selectedIds.size > 100 ? ' (max 100)' : ''}</Button>
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button>
         </div>}
 
@@ -554,7 +565,7 @@ export function AllLeadsPage() {
           {loading ? <div className="flex items-center justify-center py-16 text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading leads...</div> :
           <Table className="min-w-[1420px] text-base">
             <TableHeader><TableRow className="table-header">
-              <TableHead className="w-10"><Checkbox aria-label="Select all matching submissions" checked={filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>
+              {isAdmin && <TableHead className="w-10"><Checkbox aria-label="Select all matching submissions" checked={filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>}
               {sortHeader('Name','name')}
               <TableHead>Email</TableHead>
               <TableHead>Mobile</TableHead>
@@ -567,11 +578,11 @@ export function AllLeadsPage() {
               <TableHead className="w-28 text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {grouped.length === 0 ? <TableRow><TableCell colSpan={11} className="py-16 text-center text-muted-foreground">
+              {grouped.length === 0 ? <TableRow><TableCell colSpan={isAdmin ? 11 : 10} className="py-16 text-center text-muted-foreground">
                 <Inbox className="mx-auto mb-3 h-8 w-8 opacity-40" /><p className="font-medium text-foreground">No matching leads</p><p className="mt-1 text-sm">Try another filter or refresh to check new enquiries.</p>
               </TableCell></TableRow> : grouped.flatMap(({ key, items, latest, firstAt }) =>
                 (expanded.has(key) ? items : [latest]).map((lead, index) => <TableRow key={lead.id} className={index > 0 ? 'bg-muted/20' : 'hover:bg-muted/30'}>
-                  <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>
+                  {isAdmin && <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>}
                   <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button></TableCell>
                   <TableCell className="max-w-[220px] truncate align-top text-base" title={lead.email}>{lead.email || '-'}</TableCell>
                   <TableCell className="whitespace-nowrap align-top text-base">{lead.mobile || '-'}</TableCell>
@@ -585,14 +596,15 @@ export function AllLeadsPage() {
                     className="inline-flex min-h-9 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>
                     {expanded.has(key) ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}{items.length} entries</button> : index === 0 ? <span className="text-xs text-muted-foreground">First seen {formatDate(firstAt)}</span> : <span className="text-xs text-muted-foreground">History</span>}</TableCell>
                   <TableCell className="align-top"><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`View details for ${lead.name || 'lead'}`} onClick={() => setDetailLead(lead)}><Eye className="h-4 w-4" /></Button>
-                    {lead.status === 'Failed' && <Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`Retry ${lead.name || 'lead'}`} onClick={() => handleRetryLead(lead)}><RefreshCw className="h-4 w-4" /></Button>}</div></TableCell>
+                    {isAdmin && lead.status === 'Failed' && <Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`Retry ${lead.name || 'lead'}`} onClick={() => handleRetryLead(lead)}><RefreshCw className="h-4 w-4" /></Button>}
+                    {isAdmin && <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" aria-label={`Delete submission for ${lead.name || 'lead'}`} onClick={() => handleDeleteLeads([lead.id])}><Trash2 className="h-4 w-4" /></Button>}</div></TableCell>
                 </TableRow>))}
             </TableBody>
           </Table>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground">
           <span>Showing {grouped.length} leads. Matching email and mobile submissions are nested in each lead's history.</span>
-          <span>Export includes one row per visible lead.</span>
+          {isAdmin && <span>Export includes one row per visible lead.</span>}
         </div>
       </Card>
       {hasMore && <div className="text-center"><Button variant="outline" onClick={() => setPageCount((count) => count + 1)} disabled={loading}>Load older leads</Button></div>}
@@ -645,9 +657,9 @@ export function AllLeadsPage() {
                 </section>
 
                 {detailLead.isInbound && <div className="space-y-2 border-t pt-4">
-                  <Button asChild variant="outline" size="sm"><a href={`/api/inbound/generic-leads/${detailLead.id}/archive.zip`}>
+                  {isAdmin && <Button asChild variant="outline" size="sm"><a href={`/api/inbound/generic-leads/${detailLead.id}/archive.zip`}>
                     <Download className="h-4 w-4 mr-2" /> Download incoming payload ZIP
-                  </a></Button>
+                  </a></Button>}
                   <p className="text-sm font-medium">Auto-push destinations</p>
                   {!!detailLead.matchedRules?.length && <p className="text-xs text-muted-foreground">Matched rules: {detailLead.matchedRules.join(', ')}</p>}
                   {!!detailLead.skippedDestinations && <p className="text-xs text-destructive">{detailLead.skippedDestinations} destination was removed before this lead arrived. Update the automation rule.</p>}
@@ -664,7 +676,7 @@ export function AllLeadsPage() {
                   <dl className="grid grid-cols-2 gap-3">{Object.entries(detailLead.extraData).map(([label,value]) => detailField(detailLead,label,value))}</dl>
                 </section>}
 
-                {detailLead.status === "Failed" && (
+                {isAdmin && detailLead.status === "Failed" && (
                   <Button
                     className="w-full"
                     onClick={() => {
@@ -675,6 +687,9 @@ export function AllLeadsPage() {
                     <RefreshCw className="h-4 w-4 mr-2" /> Retry This Lead
                   </Button>
                 )}
+                {isAdmin && <Button variant="destructive" className="w-full" onClick={() => handleDeleteLeads([detailLead.id])}>
+                  <Trash2 className="h-4 w-4 mr-2" /> Delete this submission
+                </Button>}
               </div>
             </>
           )}

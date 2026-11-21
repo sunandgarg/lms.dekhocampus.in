@@ -191,7 +191,8 @@ const Index = () => {
     if (adminAuthLoading || isAdmin) return;
 
     const userAllowedLeadPushRoutes = new Set(['upload', 'active-tasks']);
-    const isAllowedUserRoute = activeTab === 'lead-push' && subRoute && userAllowedLeadPushRoutes.has(subRoute);
+    const isAllowedUserRoute = activeTab === 'all-leads' ||
+      activeTab === 'lead-push' && subRoute && userAllowedLeadPushRoutes.has(subRoute);
 
     if (!isAllowedUserRoute) {
       navigate('/lead-push/upload', { replace: true });
@@ -845,9 +846,9 @@ const Index = () => {
 
       <main className="pb-16">
         {/* All Leads */}
-        {isAdmin && <div className={activeTab === 'all-leads' ? '' : 'hidden'}>
+        <div className={activeTab === 'all-leads' ? '' : 'hidden'}>
           <AllLeadsPage />
-        </div>}
+        </div>
 
         {/* Dashboard */}
         {isAdmin && <div className={activeTab === 'dashboard' ? '' : 'hidden'}>

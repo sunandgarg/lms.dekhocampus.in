@@ -13,6 +13,7 @@ import { receiveLead } from './inbound.mjs';
 import { createGenericConnection, listGenericConnections, receiveGenericLead, updateGenericConnection } from './generic-inbound.mjs';
 import { processQueue, serverIp, verifyDomain } from './misc-functions.mjs';
 import { canUpload, isAdmin, requireOwnedBatch, userRecords } from './access.mjs';
+import { hideLeads } from './lead-visibility.mjs';
 import { batchReport } from './report.mjs';
 import { testApi, testCustomIntegration } from './test-integrations.mjs';
 import { exportData, importData } from './db-transfer.mjs';
@@ -199,6 +200,18 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
       const user = await sessionUser(db, request);
       if (!user || !user.is_approved) return send(response, 401, { error: 'Sign in required' });
       if (url.pathname === '/api/auth/me' && method === 'GET') return send(response, 200, { user: clientUser(user) });
+
+      if (url.pathname === '/api/functions/all-leads-excluded-batches' && method === 'POST') {
+        await readJson(request);
+        const { data } = await executeRecords(db, { table: 'upload_batches', select: 'id,file_name',
+          order: [{ field: 'created_at', ascending: false }], limit: 1000 });
+        return send(response, 200, { ids: data.filter((batch) =>
+          !/^(API_|facebook_ads_|google_ads_|bing_ads_|LandingPage:)/i.test(batch.file_name || '')).map((batch) => batch.id) });
+      }
+      if (url.pathname === '/api/functions/delete-leads' && method === 'POST') {
+        requireAdmin(user);
+        return send(response, 200, await hideLeads(db, user, (await readJson(request)).lead_ids));
+      }
 
       if (url.pathname === '/api/generic-connections' && method === 'GET') {
         requireAdmin(user);

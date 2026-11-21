@@ -4,12 +4,17 @@ import { userRecords } from './access.mjs';
 
 const user = { id: '303670cf-d907-4d52-afb7-876935cb2a3a', role: 'user' };
 
-test('team users only read their own lead history', async () => {
-  let bound;
-  const db = { execute: async (_sql, values) => { bound = values; return [[{ data: { id: 'x', user_id: user.id } }]]; } };
+test('team users can read All Leads but still only read their own batch history', async () => {
+  let bound, sql;
+  const db = { execute: async (statement, values) => { sql = statement; bound = values; return [[{ data: { id: 'x', user_id: user.id } }]]; } };
   const result = await userRecords(db, user, { table: 'leads', select: 'id, user_id' });
   assert.deepEqual(result.data, [{ id: 'x', user_id: user.id }]);
-  assert.deepEqual(bound, ['leads', user.id, 1000, 0]);
+  assert.deepEqual(bound, ['leads', 1000, 0]);
+  assert.match(sql, /deleted_at/);
+  await userRecords(db, user, { table: 'inbound_leads', select: 'id' });
+  assert.deepEqual(bound, ['inbound_leads', 1000, 0]);
+  await userRecords(db, user, { table: 'upload_batches', select: 'id,file_name' });
+  assert.deepEqual(bound, ['upload_batches', user.id, 1000, 0]);
 });
 
 test('team users cannot read partner credentials', async () => {
@@ -23,6 +28,12 @@ test('team users cannot read partner credentials', async () => {
   assert.equal(result.data[0].column_mapping.__static_AccessKey, '');
   assert.equal(JSON.parse(result.data[0].column_mapping.__field_key).staticValue, '');
   assert.deepEqual(result.data[0].default_values, { campus: 'Noida' });
+});
+
+test('team users see incoming lead data without stored credential fields', async () => {
+  const db = { execute: async () => [[{ data: { id: 'x', extra_data: { city: 'Noida', access_token: 'private' } } }]] };
+  const result = await userRecords(db, user, { table: 'inbound_leads', select: '*' });
+  assert.deepEqual(result.data[0].extra_data, { city: 'Noida' });
 });
 
 test('team users cannot edit university configuration', async () => {

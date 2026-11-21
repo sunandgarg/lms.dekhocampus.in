@@ -58,6 +58,13 @@ function hideCredentials(result) {
   return { ...result, data: Array.isArray(result.data) ? result.data.map(strip) : strip(result.data) };
 }
 
+function hideLeadSecrets(result) {
+  const strip = (row) => row?.extra_data && typeof row.extra_data === 'object'
+    ? { ...row, extra_data: Object.fromEntries(Object.entries(row.extra_data)
+      .filter(([key]) => !/(?:api.?key|access.?key|secret|token|password|authorization|(?:^|[_-])key(?:$|[_-]))/i.test(key))) } : row;
+  return { ...result, data: Array.isArray(result.data) ? result.data.map(strip) : strip(result.data) };
+}
+
 export async function userRecords(db, user, input) {
   // A safety pause can only be lifted by the discussion-recording control endpoint.
   if (input?.table === 'upload_batches' && input.action === 'update' &&
@@ -84,6 +91,10 @@ export async function userRecords(db, user, input) {
   const query = { ...input, filters: [...(input.filters || [])] };
   const action = query.action || 'select';
   if (action === 'select') {
+    if (query.table === 'inbound_leads' || query.table === 'leads') {
+      query.filters.push({ field: 'deleted_at', op: 'is', value: null });
+      return hideLeadSecrets(await executeRecords(db, query));
+    }
     if (CONFIG_READ.has(query.table)) {
       const result = await executeRecords(db, query);
       return query.table === 'universities' ? hideCredentials(result) : result;

@@ -20,7 +20,7 @@ export async function retryLeads({ db, s3, bucket, leadIds, userId, maxRetries =
     throw Object.assign(new Error('Choose 1 to 100 valid leads'), { status: 400 });
   }
   const { data: found } = await executeRecords(db, { table: 'leads', select: '*',
-    filters: [{ field: 'id', op: 'in', value: leadIds }], limit: 100 });
+    filters: [{ field: 'id', op: 'in', value: leadIds }, { field: 'deleted_at', op: 'is', value: null }], limit: 100 });
   const eligible = found.filter((lead) => ['Fail', 'failed'].includes(lead.status) && Number(lead.retry_count || 0) < maxRetries);
   if (!eligible.length) return { retried: 0, skipped: leadIds.length, results: [] };
   const results = [];
@@ -36,7 +36,7 @@ export async function retryLeads({ db, s3, bucket, leadIds, userId, maxRetries =
       const csv = fields.map(cell).join(',') + '\n' + fields.map((field) => cell(data[field])).join(',') + '\n';
       await saveSourceFile({ s3, bucket, batchId: batch.id, filename: 'retry.csv', body: Buffer.from(csv) });
       const [claimed] = await db.execute(
-        "UPDATE lms_records SET data = JSON_SET(data, '$.status', 'Retrying') WHERE collection = 'leads' AND id = ? AND record_status IN ('Fail', 'failed')",
+        "UPDATE lms_records SET data = JSON_SET(data, '$.status', 'Retrying') WHERE collection = 'leads' AND id = ? AND record_status IN ('Fail', 'failed') AND JSON_EXTRACT(data, '$.deleted_at') IS NULL",
         [lead.id],
       );
       if (!claimed.affectedRows) {
@@ -75,7 +75,8 @@ export async function runAutoRetries({ db, s3, bucket }) {
   autoRetryRunning = true;
   try {
     const { data: failed } = await executeRecords(db, { table: 'leads', select: 'id, university_id, user_id, retry_count, processed_at',
-      filters: [{ field: 'status', op: 'in', value: ['Fail', 'failed'] }, { field: 'retry_count', op: 'lt', value: 10 }],
+      filters: [{ field: 'status', op: 'in', value: ['Fail', 'failed'] }, { field: 'retry_count', op: 'lt', value: 10 },
+        { field: 'deleted_at', op: 'is', value: null }],
       order: [{ field: 'created_at', ascending: true }], limit: 200 });
     const universityCache = new Map();
     for (const lead of failed) {
