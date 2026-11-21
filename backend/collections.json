@@ -412,11 +412,26 @@
     "extra_data",
     "id",
     "mobile",
+    "matched_rules",
     "name",
     "source",
+    "skipped_destinations",
     "status",
     "university_id",
     "user_id"
+  ],
+  "inbound_routing_rules": [
+    "conditions",
+    "created_at",
+    "destination_ids",
+    "id",
+    "last_triggered_at",
+    "match_mode",
+    "name",
+    "priority",
+    "status",
+    "triggered_count",
+    "updated_at"
   ],
   "landing_pages": [
     "api_key",

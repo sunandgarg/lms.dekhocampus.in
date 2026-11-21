@@ -165,7 +165,7 @@ export function ApiConnectionsPage() {
         </div>
       </div>
 
-      <GenericLeadConnections universities={universities} />
+      <GenericLeadConnections />
 
       {/* Endpoint Info */}
       <Card className="p-5 space-y-4">

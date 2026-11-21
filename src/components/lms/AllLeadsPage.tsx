@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2 } from "lucide-react";
 import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
+import { LeadAutomationSettings } from './LeadAutomationSettings';
 
 export interface LmsLead {
   id: string;
@@ -35,6 +36,8 @@ export interface LmsLead {
   destinationCount?: number;
   batchIds?: string[];
   extraData?: Record<string, string>;
+  matchedRules?: string[];
+  skippedDestinations?: number;
 }
 
 function formatDate(iso: string) {
@@ -144,12 +147,15 @@ export function AllLeadsPage() {
         // Fetch leads that are NOT from CSV upload batches
         // CSV upload batches have file_name like actual filenames (*.csv)
         // External API leads have file_name like 'API_*'
-        const { data: uploadBatchIds } = await api
+        const { data: uploadBatches, error: batchError } = await api
           .from("upload_batches")
-          .select("id")
-          .not("file_name", "like", "API_%");
+          .select("id,file_name")
+          .order('created_at', { ascending: false }).limit(1000);
+        if (batchError) throw batchError;
 
-        const excludeBatchIds = (uploadBatchIds || []).map((b) => b.id);
+        const excludeBatchIds = (uploadBatches || [])
+          .filter((batch) => !/^(API_|facebook_ads_|google_ads_|bing_ads_|LandingPage:)/i.test(batch.file_name || ''))
+          .map((batch) => batch.id);
 
         const leadsData: any[] = [];
         let existingHasMore = false;
@@ -195,6 +201,8 @@ export function AllLeadsPage() {
           isInbound: true, destinationCount: lead.batch_ids?.length || 0,
           batchIds: lead.batch_ids || [],
           extraData: lead.extra_data || {},
+          matchedRules: lead.matched_rules || [],
+          skippedDestinations: lead.skipped_destinations || 0,
         }));
         setLeads([...incoming, ...mapped].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)));
         setHasMore(inboundHasMore || existingHasMore);
@@ -336,6 +344,8 @@ export function AllLeadsPage() {
   return (
     <div className="container mx-auto px-4 py-6 space-y-4">
       <DataRetentionNotice variant="banner" className="mb-2" />
+
+      <LeadAutomationSettings />
 
       <div className="flex items-center justify-between">
         <div>
@@ -635,6 +645,8 @@ export function AllLeadsPage() {
                     <Download className="h-4 w-4 mr-2" /> Download incoming payload ZIP
                   </a></Button>
                   <p className="text-sm font-medium">Auto-push destinations</p>
+                  {!!detailLead.matchedRules?.length && <p className="text-xs text-muted-foreground">Matched rules: {detailLead.matchedRules.join(', ')}</p>}
+                  {!!detailLead.skippedDestinations && <p className="text-xs text-destructive">{detailLead.skippedDestinations} destination was removed before this lead arrived. Update the automation rule.</p>}
                   {detailLead.destinationCount === 0 ? <p className="text-xs text-muted-foreground">Collect only — no automatic push configured.</p>
                     : routeBatches.length === 0 ? <p className="text-xs text-muted-foreground">Loading delivery status...</p>
                     : routeBatches.map((batch) => <div key={batch.id} className="text-sm border rounded p-2">

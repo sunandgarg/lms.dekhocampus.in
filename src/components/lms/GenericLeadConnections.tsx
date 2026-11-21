@@ -3,19 +3,16 @@ import { Check, Copy, Plus, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 
 type Connection = {
-  id: string; name: string; source_label: string; destination_ids: string[];
+  id: string; name: string; source_label: string;
   field_map: Record<string, string>; is_active: boolean; request_count: number;
   last_used_at?: string | null;
 };
-type University = { id: string; name: string };
 const MAPPABLE = [
   { key: 'name', label: 'Name field' }, { key: 'email', label: 'Email field' },
   { key: 'mobile', label: 'Phone field' }, { key: 'source', label: 'Source field' },
@@ -31,7 +28,7 @@ async function call(path: string, method = 'GET', body?: unknown) {
   return data;
 }
 
-export function GenericLeadConnections({ universities }: { universities: University[] }) {
+export function GenericLeadConnections() {
   const { toast } = useToast();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +36,6 @@ export function GenericLeadConnections({ universities }: { universities: Univers
   const [editing, setEditing] = useState<Connection | null>(null);
   const [name, setName] = useState('');
   const [source, setSource] = useState('');
-  const [destinations, setDestinations] = useState<string[]>([]);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
   const [key, setKey] = useState('');
   const [saving, setSaving] = useState(false);
@@ -58,7 +54,6 @@ export function GenericLeadConnections({ universities }: { universities: Univers
     setEditing(connection);
     setName(connection?.name || '');
     setSource(connection?.source_label || '');
-    setDestinations(connection?.destination_ids || []);
     setFieldMap(connection?.field_map || {});
     setKey('');
     setOpen(true);
@@ -70,7 +65,7 @@ export function GenericLeadConnections({ universities }: { universities: Univers
   const save = async () => {
     setSaving(true);
     try {
-      const body = { name: name.trim(), source_label: source.trim(), destination_ids: destinations,
+      const body = { name: name.trim(), source_label: source.trim(),
         field_map: Object.fromEntries(Object.entries(fieldMap).filter(([, value]) => value.trim())) };
       const result = editing
         ? await call(`/api/generic-connections/${editing.id}`, 'PATCH', body)
@@ -88,14 +83,13 @@ export function GenericLeadConnections({ universities }: { universities: Univers
       await load();
     } catch (error) { toast({ title: 'Could not update connection', description: String(error), variant: 'destructive' }); }
   };
-  const names = (ids: string[]) => ids.map((id) => universities.find((item) => item.id === id)?.name || 'Unknown').join(', ');
 
   return <>
     <Card className="p-5 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Generic Lead API</h2>
-          <p className="text-sm text-muted-foreground">Collect leads from ads, forms, CRMs, or automation tools. Choose destinations to push each new lead automatically.</p>
+          <p className="text-sm text-muted-foreground">Collect leads from ads, forms, CRMs, or automation tools. Configure automatic push rules under All Leads → Lead automation.</p>
         </div>
         <Button onClick={() => show(null)}><Plus className="h-4 w-4 mr-2" /> New connection</Button>
       </div>
@@ -124,7 +118,7 @@ export function GenericLeadConnections({ universities }: { universities: Univers
                 <Badge variant={connection.is_active ? 'default' : 'secondary'}>{connection.is_active ? 'Active' : 'Paused'}</Badge></div>
               <p className="text-xs text-muted-foreground">Source: {connection.source_label} · {connection.request_count || 0} received
                 {connection.last_used_at ? ` · Last used ${new Date(connection.last_used_at).toLocaleString()}` : ''}</p>
-              <p className="text-xs text-muted-foreground">Auto-push: {connection.destination_ids?.length ? names(connection.destination_ids) : 'Off — collect only'}</p>
+              <p className="text-xs text-muted-foreground">Automatic routing is managed under All Leads.</p>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => show(connection)}>Edit</Button>
@@ -142,15 +136,6 @@ export function GenericLeadConnections({ universities }: { universities: Univers
         </div> : <div className="space-y-4">
           <div><Label>Connection name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Meta Ads website" /></div>
           <div><Label>Default source label</Label><Input value={source} onChange={(e) => setSource(e.target.value)} placeholder="Meta Ads" /></div>
-          <div>
-            <Label>Auto-push destinations</Label>
-            <p className="text-xs text-muted-foreground mb-2">Leave empty to collect only. New leads are queued immediately for selected universities.</p>
-            <ScrollArea className="h-36 border rounded p-2"><div className="space-y-1">{universities.map((uni) =>
-              <label key={uni.id} className="flex gap-2 items-center text-sm cursor-pointer">
-                <Checkbox checked={destinations.includes(uni.id)} onCheckedChange={(checked) => setDestinations((prev) => checked
-                  ? [...prev, uni.id] : prev.filter((id) => id !== uni.id))} /> {uni.name}
-              </label>)}</div></ScrollArea>
-          </div>
           <div>
             <Label>Incoming field names (optional)</Label>
             <p className="text-xs text-muted-foreground mb-2">Use these if the sender uses different names. Dot paths such as contact.email are supported.</p>

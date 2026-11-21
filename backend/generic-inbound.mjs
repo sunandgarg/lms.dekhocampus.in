@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { executeRecords } from './records.mjs';
 import { saveSourceFile } from './archive.mjs';
+import { matchingInboundRules } from './inbound-routing.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FIELDS = ['name', 'email', 'mobile', 'source', 'medium', 'campaign', 'course', 'city', 'state'];
@@ -15,23 +16,23 @@ function settings(input) {
   const name = String(input?.name || '').trim();
   const source = String(input?.source_label || '').trim();
   if (!name || name.length > 100 || source.length > 100) fail(400, 'Use a connection name and a source label under 100 characters');
-  const destination_ids = input?.destination_ids || [];
-  if (!Array.isArray(destination_ids) || destination_ids.length > 10 ||
-      destination_ids.some((id) => typeof id !== 'string' || !UUID.test(id)) ||
-      new Set(destination_ids).size !== destination_ids.length) fail(400, 'Choose at most 10 unique universities');
   const field_map = input?.field_map || {};
   if (!record(field_map) || Object.keys(field_map).some((field) => !FIELDS.includes(field)) ||
       Object.values(field_map).some((path) => typeof path !== 'string' || path && !/^[\w.-]{1,100}$/.test(path))) {
     fail(400, 'Invalid incoming field mapping');
   }
-  return { name, source_label: source || name, destination_ids, field_map };
+  return { name, source_label: source || name, field_map };
 }
 
-async function verifyDestinations(db, ids) {
-  if (!ids.length) return;
-  const { data } = await executeRecords(db, { table: 'universities', select: 'id',
-    filters: [{ field: 'id', op: 'in', value: ids }], limit: 10 });
-  if (data.length !== ids.length) fail(400, 'One or more destinations no longer exist');
+async function existingDestinations(db, ids) {
+  const found = new Set();
+  for (let start = 0; start < ids.length; start += 500) {
+    const group = ids.slice(start, start + 500);
+    const { data } = await executeRecords(db, { table: 'universities', select: 'id',
+      filters: [{ field: 'id', op: 'in', value: group }], limit: group.length });
+    for (const row of data) found.add(row.id);
+  }
+  return found;
 }
 
 export async function listGenericConnections(db) {
@@ -42,7 +43,6 @@ export async function listGenericConnections(db) {
 
 export async function createGenericConnection(db, input, userId) {
   const values = settings(input);
-  await verifyDestinations(db, values.destination_ids);
   const key = `dcg_${randomBytes(32).toString('base64url')}`;
   const { data } = await executeRecords(db, { table: 'inbound_connections', action: 'insert',
     select: '*', single: true, returnRows: true,
@@ -57,7 +57,6 @@ export async function updateGenericConnection(db, id, input) {
     filters: [{ field: 'id', op: 'eq', value: id }], single: true });
   if (!current) fail(404, 'Connection not found');
   const values = settings({ ...current, ...input });
-  await verifyDestinations(db, values.destination_ids);
   if (input?.is_active != null && typeof input.is_active !== 'boolean') fail(400, 'Invalid active setting');
   const { data } = await executeRecords(db, { table: 'inbound_connections', action: 'update',
     filters: [{ field: 'id', op: 'eq', value: id }], select: '*', single: true, returnRows: true,
@@ -135,7 +134,14 @@ export async function receiveGenericLead({ db, s3, bucket, token, payload, idemp
       return { accepted: true, duplicate: true, lead_id: existing[0].lead_id };
     }
   }
-  await verifyDestinations(db, connection.destination_ids || []);
+  const matchedRules = await matchingInboundRules(db, leadData, payload);
+  const destinations = new Map();
+  for (const rule of matchedRules) for (const universityId of rule.destination_ids) {
+    if (UUID.test(universityId) && !destinations.has(universityId)) destinations.set(universityId, rule.name);
+  }
+  const existing = await existingDestinations(db, [...destinations.keys()]);
+  const skippedDestinations = [...destinations.keys()].filter((id) => !existing.has(id));
+  for (const id of skippedDestinations) destinations.delete(id);
   const id = randomUUID();
   if (!bucket) fail(503, 'Archive bucket unavailable');
   try { await saveSourceFile({ s3, bucket, batchId: id, filename: 'incoming.json',
@@ -159,12 +165,12 @@ export async function receiveGenericLead({ db, s3, bucket, token, payload, idemp
       }
     }
     const batchIds = [];
-    for (const universityId of connection.destination_ids || []) {
+    for (const [universityId, routeName] of destinations) {
       const batchId = randomUUID();
       batchIds.push(batchId);
       await executeRecords(transaction, { table: 'upload_batches', action: 'insert', values: {
         id: batchId, university_id: universityId, user_id: connection.user_id,
-        file_name: `Generic Push: ${connection.name}`, total_leads: 1,
+        file_name: `Generic Push: ${routeName}`, total_leads: 1,
         status: 'processing', is_paused: false, is_cancelled: false,
         processed_count: 0, success_count: 0, fail_count: 0, duplicate_count: 0,
         source_label: lead.source,
@@ -178,15 +184,23 @@ export async function receiveGenericLead({ db, s3, bucket, token, payload, idemp
       id, connection_id: connection.id, connection_name: connection.name, user_id: connection.user_id,
       name: lead.name, email: lead.email, mobile: lead.mobile, city: lead.city, course: lead.course,
       source: lead.source, campaign: lead.campaign, status: 'Received',
-      batch_ids: batchIds, extra_data: extra,
+      batch_ids: batchIds, matched_rules: matchedRules.map((rule) => rule.name),
+      skipped_destinations: skippedDestinations.length, extra_data: extra,
     } });
+    for (const rule of matchedRules) {
+      await transaction.execute(`UPDATE lms_records SET data = JSON_SET(data,
+        '$.triggered_count', COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$.triggered_count')) AS UNSIGNED), 0) + 1,
+        '$.last_triggered_at', ?) WHERE collection = 'inbound_routing_rules' AND id = ?`,
+      [new Date().toISOString(), rule.id]);
+    }
     await transaction.execute(`UPDATE lms_records SET data = JSON_SET(data,
       '$.request_count', COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$.request_count')) AS UNSIGNED), 0) + 1,
       '$.last_used_at', ?) WHERE collection = 'inbound_connections' AND id = ?`,
     [new Date().toISOString(), connection.id]);
     await transaction.commit();
     return { accepted: true, duplicate: false, lead_id: id,
-      queued_destinations: batchIds.length, batch_ids: batchIds };
+      queued_destinations: batchIds.length, skipped_destinations: skippedDestinations.length,
+      matched_rules: matchedRules.map((rule) => rule.name), batch_ids: batchIds };
   } catch (error) { await transaction.rollback(); throw error; }
   finally { transaction.release(); }
 }
