@@ -28,12 +28,12 @@ async function integrationFor(db, platform, key) {
 }
 
 function normalizeLead(raw, platform, campaign) {
-  const lead = { name: raw.name || raw.full_name || raw.first_name || '',
+  const lead = { name: raw.name || raw.full_name || raw.first_name || 'Unnamed Lead',
     email: raw.email || raw.email_address || '', mobile: raw.mobile || raw.phone || raw.phone_number || '',
     city: raw.city || '', state: raw.state || '', course: raw.course || raw.program || raw.interest || '',
     leadSource: platform === 'facebook' ? 'Facebook Lead Ads' : platform === 'bing' ? 'Bing Lead Ads' : 'Google Lead Ads',
     leadMedium: 'paid', leadCampaign: campaign || raw.campaign || raw.campaign_name || '' };
-  if (!lead.name || !lead.email || !lead.mobile) fail(400, 'Webhook lead requires name, email, and mobile');
+  if (!lead.email && !lead.mobile) fail(400, 'Webhook lead requires email or mobile');
   return { ...Object.fromEntries(Object.entries(raw).filter(([, value]) =>
     value != null && typeof value !== 'object').map(([field, value]) => [field, String(value)])),
     ...Object.fromEntries(Object.entries(lead).map(([field, value]) => [field, String(value)])),
@@ -71,7 +71,25 @@ async function metaLeads(payload) {
   return leads;
 }
 
-function googleLeads(payload, platform) {
+export function googleLeads(payload, platform) {
+  if (Array.isArray(payload.user_column_data)) {
+    const raw = {};
+    for (const column of payload.user_column_data) {
+      const key = String(column.column_id || column.column_name || '').toLowerCase();
+      const value = column.string_value;
+      if (!key || value == null) continue;
+      raw[key] = value;
+      if (/email/.test(key)) raw.email = value;
+      else if (/phone|mobile/.test(key)) raw.mobile = value;
+      else if (/name/.test(key)) raw.name = value;
+      else if (/city/.test(key)) raw.city = value;
+      else if (/state/.test(key)) raw.state = value;
+      else if (/course|program/.test(key)) raw.course = value;
+    }
+    return [{ ...normalizeLead(raw, platform, payload.campaign_name || payload.campaign_id),
+      external_id: String(payload.lead_id || ''), form_id: String(payload.form_id || ''),
+      is_test: String(payload.is_test === true) }];
+  }
   if (payload.leadFormSubmission) {
     const submission = payload.leadFormSubmission;
     const raw = {};
@@ -95,7 +113,7 @@ function googleLeads(payload, platform) {
 
 export async function handleAdWebhook({ db, s3, bucket, platform, key, payload }) {
   if (!payload || typeof payload !== 'object') fail(400, 'Invalid webhook payload');
-  const { setting, config } = await integrationFor(db, platform, key || payload.google_key);
+  const { setting, config } = await integrationFor(db, platform, key || payload.google_key || payload.Google_key);
   const actualPlatform = config.platform;
   const leads = actualPlatform === 'facebook' ? await metaLeads(payload) : googleLeads(payload, actualPlatform);
   if (!leads.length || leads.length > 100) fail(400, 'Expected 1 to 100 leads');
