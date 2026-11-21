@@ -88,6 +88,24 @@ export async function saveSourceFile({ s3, bucket, batchId, filename, body, cont
   return key;
 }
 
+function csvCell(value) {
+  const raw = String(value ?? '');
+  const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replaceAll('"', '""')}"`;
+}
+
+export async function saveTransactionCsv({ s3, bucket, batchId, transactionId, leadData, result }) {
+  const status = result.status === 'Success' ? 'Success' : result.status === 'Duplicate' ? 'Duplicate' : 'Fail';
+  const color = status === 'Success' ? 'Green' : status === 'Duplicate' ? 'Red' : 'Light yellow';
+  const columns = [...Object.keys(leadData), 'delivery_status', 'status_color', 'partner_response'];
+  const values = [...Object.values(leadData), status, color, result.response || ''];
+  const body = `${columns.map(csvCell).join(',')}\r\n${values.map(csvCell).join(',')}\r\n`;
+  const key = `${batchPrefix(batchId)}transactions/${transactionId}/response.csv`;
+  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body,
+    ContentType: 'text/csv; charset=utf-8', ServerSideEncryption: 'AES256' }));
+  return key;
+}
+
 export async function streamBatchZip({ s3, bucket, batchId, output, reportRows, migrationNote }) {
   const prefix = batchPrefix(batchId);
   const zip = new yazl.ZipFile();

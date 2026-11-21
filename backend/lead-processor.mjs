@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
-import { archiveAndDeliver, redactPartnerResponse } from './archive.mjs';
+import { archiveAndDeliver, redactPartnerResponse, saveTransactionCsv } from './archive.mjs';
 import { buildPayload, categorizeResponse } from './lead-payload.mjs';
 import { executeRecords } from './records.mjs';
 import { syncLeadToCrm } from './crm-sync.mjs';
 import { updateLeadStats } from './stats.mjs';
 import { mergePartnerMapping } from './inbound-field-overrides.mjs';
+import { batchHalted } from './batch-gate.mjs';
 
 let activeDeliveries = 0;
 const waitingDeliveries = [];
@@ -152,12 +153,14 @@ function leadRow(task, result, userId) {
 }
 
 async function deliverPartner(task, config, db, outbound) {
+  if (batchHalted(task.batchId)) return { success: false, status: 'Cancelled', response: 'Batch was paused before delivery', httpStatus: 0 };
   const batch = await recordById(db, 'upload_batches', task.batchId);
   if (!batch || batch.is_paused || batch.is_cancelled || ['cancelled', 'paused'].includes(String(batch.status).toLowerCase())) {
     return { success: false, status: 'Cancelled', response: 'Batch was stopped before delivery', httpStatus: 0 };
   }
   const capacity = await reserveDailyCapacity(db, task.universityId);
   if (!capacity.allowed) return { success: false, status: capacity.status, response: capacity.response, httpStatus: 0 };
+  if (batchHalted(task.batchId)) return { success: false, status: 'Cancelled', response: 'Batch was paused before delivery', httpStatus: 0 };
 
   const timeout = Math.min(300, Math.max(5, Number(config.apiTimeoutSeconds) || 30));
   try {
@@ -215,12 +218,17 @@ export async function processLead({ db, s3, bucket, task, userId }) {
       : { success: false, status: archiveError ? 'Archive_Error' : 'Fail', response: String(error), httpStatus: 0 };
   }
   result.response = redactPartnerResponse(String(result.response || ''), config);
+  // A pause may land after queue claim but before the actual HTTP request.
+  // Leave that lead unsent so it can be resumed; do not count it as a failure.
+  if (result.status === 'Cancelled') return result;
   await db.execute(
     'INSERT INTO lms_transactions (id, batch_id, university_id, user_id, request_key, response_key, status, http_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [transactionId, task.batchId, task.universityId, userId, `${prefix}request.json`, archiveError ? null : `${prefix}response.json`, result.status, result.httpStatus],
   );
   const { data: savedLead } = await executeRecords(db, { table: 'leads', action: 'insert', select: '*', single: true,
     values: leadRow(task, result, userId), returnRows: true });
+  await saveTransactionCsv({ s3, bucket, batchId: task.batchId, transactionId,
+    leadData: task.leadData, result });
   await executeRecords(db, { table: 'api_logs', action: 'insert', values: {
     university_id: task.universityId, batch_id: task.batchId, user_id: userId, status: result.status,
     email: task.leadData.email || null, mobile: task.leadData.mobile || null,

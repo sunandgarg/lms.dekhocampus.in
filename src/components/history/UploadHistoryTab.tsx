@@ -16,6 +16,8 @@ interface UploadBatch {
   created_at: string;
   completed_at: string | null;
   error_message?: string;
+  safety_pause_reason?: string;
+  discussion_with?: string;
   historical_import_without_source?: boolean;
 }
 
@@ -50,6 +52,21 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
   const [batchReport, setBatchReport] = useState<BatchLeadSummary | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [discussionByBatch, setDiscussionByBatch] = useState<Record<string, string>>({});
+  const [controlError, setControlError] = useState('');
+
+  const continueBatch = async (batchId: string) => {
+    const response = await fetch(`/api/batches/${batchId}/control`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'continue', discussionWith: discussionByBatch[batchId] || '' }) });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      setControlError(body.error || 'Could not continue the batch');
+      return;
+    }
+    setControlError('');
+    fetchBatches();
+  };
 
   const fetchBatches = useCallback(
     async (offset = 0) => {
@@ -57,7 +74,7 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
       try {
         let query = api
           .from("upload_batches")
-          .select("id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, created_at, completed_at, error_message, historical_import_without_source")
+          .select("id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, created_at, completed_at, error_message, safety_pause_reason, discussion_with, historical_import_without_source")
           .order("created_at", { ascending: false });
 
         if (selectedUniversity) query = query.eq("university_id", selectedUniversity);
@@ -156,10 +173,10 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
   };
 
   const totalUploads = filteredBatches.length;
-  const totalLeads = filteredBatches.reduce((sum, b) => sum + b.total_leads, 0);
-  const totalSuccess = filteredBatches.reduce((sum, b) => sum + b.success_count, 0);
-  const totalDuplicate = filteredBatches.reduce((sum, b) => sum + (b.duplicate_count || 0), 0);
-  const totalFailed = filteredBatches.reduce((sum, b) => sum + b.fail_count, 0);
+  const totalLeads = filteredBatches.reduce((sum, b) => sum + Number(b.total_leads || 0), 0);
+  const totalSuccess = filteredBatches.reduce((sum, b) => sum + Number(b.success_count || 0), 0);
+  const totalDuplicate = filteredBatches.reduce((sum, b) => sum + Number(b.duplicate_count || 0), 0);
+  const totalFailed = filteredBatches.reduce((sum, b) => sum + Number(b.fail_count || 0), 0);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -290,7 +307,15 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
                         <div className="flex items-center gap-2">
                           <FileText className="h-4 w-4 text-muted-foreground" />
                           <span className="text-foreground">{batch.file_name || "Untitled"}</span>
-                          {batch.status === "failed" && batch.error_message && <p className="mt-1 text-xs text-destructive">{batch.error_message}</p>}
+                          {batch.error_message && ['failed', 'paused'].includes(batch.status) && <p className="mt-1 text-xs text-destructive">{batch.error_message}</p>}
+                          {batch.safety_pause_reason && <div className="mt-2 space-y-2 rounded-md border border-amber-400 bg-amber-50 p-2 text-xs text-amber-950">
+                            <strong>25 consecutive failures: paused for review</strong>
+                            <input aria-label={`Discussed with whom for ${batch.file_name}`} className="block w-full rounded border bg-white px-2 py-1 text-sm" placeholder="Discussed with whom?" maxLength={120}
+                              value={discussionByBatch[batch.id] || ''} onChange={(event) => setDiscussionByBatch((old) => ({ ...old, [batch.id]: event.target.value }))} />
+                            <button type="button" className="rounded bg-amber-900 px-3 py-1 font-semibold text-white disabled:opacity-40" disabled={!discussionByBatch[batch.id]?.trim()} onClick={() => continueBatch(batch.id)}>Continue processing</button>
+                            {controlError && <p className="text-destructive">{controlError}</p>}
+                          </div>}
+                          {batch.discussion_with && <p className="mt-1 text-xs text-muted-foreground">Discussed with: {batch.discussion_with}</p>}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -301,8 +326,8 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
                       </td>
                       <td className="px-4 py-3 text-center font-mono text-foreground">{batch.total_leads}</td>
                       <td className="px-4 py-3 text-center font-mono text-success">{batch.success_count}</td>
-                      <td className="px-4 py-3 text-center font-mono text-amber-500">{batch.duplicate_count || 0}</td>
-                      <td className="px-4 py-3 text-center font-mono text-destructive">{batch.fail_count}</td>
+                      <td className="px-4 py-3 text-center font-mono text-destructive">{batch.duplicate_count || 0}</td>
+                      <td className="px-4 py-3 text-center font-mono text-amber-600">{batch.fail_count}</td>
                       <td className="px-4 py-3 text-center">{getStatusBadge(batch)}</td>
                       <td className="px-4 py-3 text-center">
                         <div className="inline-flex items-center gap-3">
@@ -313,6 +338,7 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
                           <a href={`/api/batches/${batch.id}/archive.zip`} title={batch.historical_import_without_source ? "Historical summary only; original CSV and lead files were absent from the backup" : "Download source and transaction ZIP"} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
                             <Download className="h-3.5 w-3.5" /> {batch.historical_import_without_source ? 'ZIP (summary only)' : 'ZIP'}
                           </a>
+                          <a href={`/api/batches/${batch.id}/response.csv`} title="Download response CSV with result and color columns" className="inline-flex items-center gap-1 text-xs text-primary hover:underline"><Download className="h-3.5 w-3.5" /> Response CSV</a>
                         </div>
                       </td>
                     </tr>

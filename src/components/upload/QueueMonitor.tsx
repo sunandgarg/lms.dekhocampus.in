@@ -27,6 +27,7 @@ interface BatchInfo {
   created_at: string;
   user_id: string;
   error_message?: string;
+  safety_pause_reason?: string;
   user_email?: string;
   university_name?: string;
 }
@@ -67,7 +68,7 @@ function QueueMonitorInner() {
         let query = api
           .from("upload_batches")
           .select(
-            "id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, user_id, error_message",
+            "id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, user_id, error_message, safety_pause_reason",
           )
           .order("created_at", { ascending: false })
           .limit(50);
@@ -154,11 +155,11 @@ function QueueMonitorInner() {
     b.total_leads === 0 ? 0 : Math.round(((b.success_count + b.fail_count + ((b as any).duplicate_count || 0)) / b.total_leads) * 100);
 
   const updateBatch = useCallback(
-    async (batchId: string, updates: Record<string, unknown>, successTitle: string) => {
+    async (batchId: string, action: 'pause' | 'continue' | 'stop', successTitle: string) => {
       setProcessingId(batchId);
       try {
-        const { error } = await api.from("upload_batches").update(updates).eq("id", batchId);
-        if (error) throw error;
+        const response = await fetch(`/api/batches/${batchId}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+        if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Could not update task'); }
         toast({ title: successTitle });
         fetchBatches(true);
       } catch (error: any) {
@@ -176,25 +177,21 @@ function QueueMonitorInner() {
 
   const handlePause = useCallback(
     (batchId: string) => {
-      updateBatch(batchId, { is_paused: true, status: "paused" }, "Task paused");
+      updateBatch(batchId, 'pause', "Task paused");
     },
     [updateBatch],
   );
 
   const handleResume = useCallback(
     (batchId: string) => {
-      updateBatch(batchId, { is_paused: false, status: "processing" }, "Task resumed");
+      updateBatch(batchId, 'continue', "Task resumed");
     },
     [updateBatch],
   );
 
   const handleStop = useCallback(
     (batchId: string) => {
-      updateBatch(
-        batchId,
-        { status: "cancelled", is_cancelled: true, is_paused: false, completed_at: new Date().toISOString() },
-        "Task stopped",
-      );
+      updateBatch(batchId, 'stop', "Task stopped");
     },
     [updateBatch],
   );
@@ -328,6 +325,8 @@ function QueueMonitorInner() {
                   </div>
 
                   <Progress value={progress} className="h-1.5" />
+                  {batch.safety_pause_reason && <p className="mt-2 rounded bg-amber-50 p-2 text-xs font-medium text-amber-900">25 consecutive failures. Review the response CSV and record who you discussed it with in Upload History.</p>}
+                  <a className="mt-2 inline-block text-xs font-medium text-primary underline" href={`/api/batches/${batch.id}/response.csv`}>Download response CSV</a>
 
                   <div className="flex items-center gap-3 mt-1.5 text-[11px]">
                     <span className="text-green-600">{batch.success_count} ok</span>
@@ -353,8 +352,8 @@ function QueueMonitorInner() {
                           variant="outline"
                           size="sm"
                           className="h-7 px-2 text-xs"
-                          disabled={isWorking}
                           onClick={() => handleResume(batch.id)}
+                          disabled={isWorking || Boolean(batch.safety_pause_reason)}
                         >
                           {isWorking ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
                           Resume

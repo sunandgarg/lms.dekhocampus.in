@@ -3,7 +3,7 @@ import { PassThrough, Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { test } from 'node:test';
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { archiveAndDeliver, saveSourceFile, streamBatchZip } from './archive.mjs';
+import { archiveAndDeliver, saveSourceFile, saveTransactionCsv, streamBatchZip } from './archive.mjs';
 
 const batchId = '5fcce38a-97ba-4f97-a457-d8ab5fd73173';
 
@@ -66,6 +66,18 @@ test('source files use a safe batch-scoped key', async () => {
   });
   assert.match(key, new RegExp(`^batches/${batchId}/source/[0-9a-f-]{36}-\\.\\._leads\\.csv$`));
   assert.equal(saved.Body.toString(), 'name\nA');
+});
+
+test('each partner result gets an encrypted S3 CSV with adjacent status and color', async () => {
+  let saved;
+  await saveTransactionCsv({ s3: { send: async (command) => { saved = command.input; } },
+    bucket: 'archive', batchId, transactionId: batchId,
+    leadData: { name: '=unsafe', course: 'Aviation' }, result: { status: 'Duplicate', response: 'Already exists' } });
+  assert.match(saved.Key, /transactions\/.+\/response\.csv$/);
+  assert.match(saved.Body, /"delivery_status","status_color","partner_response"/);
+  assert.match(saved.Body, /"Duplicate","Red","Already exists"/);
+  assert.match(saved.Body, /"'=unsafe"/);
+  assert.equal(saved.ServerSideEncryption, 'AES256');
 });
 
 test('batch ZIP can be regenerated from saved S3 objects', async () => {

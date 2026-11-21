@@ -27,7 +27,7 @@ interface LeadPushModuleProps {
   onBulkImport?: (configs: any[]) => void;
 }
 
-const USER_ALLOWED_LEAD_PUSH_VIEWS = new Set(["upload", "active-tasks"]);
+const USER_ALLOWED_LEAD_PUSH_VIEWS = new Set(["upload", "active-tasks", "history"]);
 
 export function LeadPushModule({
   universities,

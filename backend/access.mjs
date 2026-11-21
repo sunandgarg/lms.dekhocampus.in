@@ -59,6 +59,19 @@ function hideCredentials(result) {
 }
 
 export async function userRecords(db, user, input) {
+  // A safety pause can only be lifted by the discussion-recording control endpoint.
+  if (input?.table === 'upload_batches' && input.action === 'update' &&
+      (input.values?.status === 'processing' || input.values?.is_paused === false)) {
+    const id = input.filters?.find((filter) => filter.field === 'id' && filter.op === 'eq')?.value;
+    if (!id) forbidden();
+    const { data: batch } = await executeRecords(db, { table: 'upload_batches', select: 'safety_pause_reason',
+      filters: [{ field: 'id', op: 'eq', value: id }], single: true });
+    if (batch?.safety_pause_reason) {
+      const error = new Error('25 leads failed consecutively. Record who you discussed this with before continuing.');
+      error.status = 409;
+      throw error;
+    }
+  }
   if (isAdmin(user)) {
     if (input?.table === 'upload_batches' && input.action === 'insert') {
       const values = Array.isArray(input.values) ? input.values : [input.values];

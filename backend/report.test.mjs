@@ -6,7 +6,7 @@ test('downloadable lead reports do not execute spreadsheet formulas', async () =
   const db = { execute: async () => [[{ data: {
     id: 'lead-1', name: '=HYPERLINK("https://bad.example")', email: 'a@example.com',
     mobile: '+1234567890', university_id: 'uni-1', status: 'Success',
-    processed_at: '2026-11-21', api_response: '@SUM(1,1)',
+    processed_at: '2026-11-21', api_response: '@SUM(1,1)', extra_data: { 'preferred campus': 'Noida' },
   } }]] };
   const chunks = [];
   for await (const chunk of batchReport(db, 'batch-1')) chunks.push(chunk);
@@ -14,4 +14,6 @@ test('downloadable lead reports do not execute spreadsheet formulas', async () =
   assert.match(report, /"'=HYPERLINK/);
   assert.match(report, /"'\+1234567890"/);
   assert.match(report, /"'@SUM/);
+  assert.match(report, /"preferred campus","delivery_status","status_color"/);
+  assert.match(report, /"Noida","Success","Green"/);
 });

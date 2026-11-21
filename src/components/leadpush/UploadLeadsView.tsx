@@ -280,7 +280,10 @@ export function UploadLeadsView({ universities, selectedUniversity, onSelectUniv
         </nav>
       )}
 
-      <DataRetentionNotice variant="banner" className="mb-4" />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <DataRetentionNotice variant="banner" className="flex-1" />
+        <Button variant="outline" onClick={() => navigate('/lead-push/history')}>Upload History &amp; Response CSV</Button>
+      </div>
       
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">

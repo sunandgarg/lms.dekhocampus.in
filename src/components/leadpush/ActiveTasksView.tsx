@@ -27,6 +27,7 @@ interface BatchTask {
   user_email?: string;
   university_name?: string;
   leads_per_minute?: number;
+  safety_pause_reason?: string;
 }
 
 // Caches to avoid repeated lookups
@@ -45,7 +46,7 @@ function ActiveTasksViewInner() {
     try {
       const { data, error } = await api
         .from('upload_batches')
-        .select('id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, completed_at, user_id, leads_per_minute, scheduled_at')
+        .select('id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, completed_at, user_id, leads_per_minute, scheduled_at, safety_pause_reason')
         .in('status', ['processing', 'pending', 'paused', 'scheduled'])
         .order('created_at', { ascending: false })
         .limit(100);
@@ -84,10 +85,11 @@ function ActiveTasksViewInner() {
     }
   }, [toast]);
 
-  const updateTask = useCallback(async (batchId: string, changes: Record<string, unknown>, title: string) => {
-    const { error } = await api.from('upload_batches').update(changes).eq('id', batchId);
-    if (error) {
-      toast({ title: 'Could not update task', description: error.message, variant: 'destructive' });
+  const updateTask = useCallback(async (batchId: string, action: 'pause' | 'continue' | 'stop', title: string) => {
+    const response = await fetch(`/api/batches/${batchId}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      toast({ title: 'Could not update task', description: body.error || 'Request failed', variant: 'destructive' });
       return;
     }
     toast({ title });
@@ -95,15 +97,15 @@ function ActiveTasksViewInner() {
   }, [toast, fetchTasks]);
 
   const handlePause = useCallback((batchId: string) => {
-    updateTask(batchId, { is_paused: true, status: 'paused' }, 'Paused');
+    updateTask(batchId, 'pause', 'Paused');
   }, [updateTask]);
 
   const handleResume = useCallback((batchId: string) => {
-    updateTask(batchId, { is_paused: false, status: 'processing' }, 'Resumed');
+    updateTask(batchId, 'continue', 'Resumed');
   }, [updateTask]);
 
   const handleStop = useCallback((batchId: string) => {
-    updateTask(batchId, { status: 'cancelled', is_cancelled: true, completed_at: new Date().toISOString() }, 'Stopped');
+    updateTask(batchId, 'stop', 'Stopped');
   }, [updateTask]);
 
   const { activeTasks, scheduledTasks } = useMemo(() => ({
@@ -158,7 +160,7 @@ function ActiveTasksViewInner() {
           {(task.status === 'processing' || task.status === 'pending' || task.status === 'scheduled' || task.is_paused) && (
             <div className="flex items-center gap-1">
               {task.is_paused ? (
-                <Button variant="ghost" size="sm" onClick={() => handleResume(task.id)} title="Resume">
+                <Button variant="ghost" size="sm" onClick={() => handleResume(task.id)} title="Resume" disabled={Boolean(task.safety_pause_reason)}>
                   <Play className="h-4 w-4 text-green-600" />
                 </Button>
               ) : task.status !== 'scheduled' ? (
@@ -182,6 +184,8 @@ function ActiveTasksViewInner() {
           </div>
 
         <Progress value={progress} className="h-1.5" />
+        {task.safety_pause_reason && <p className="mt-2 rounded bg-amber-50 p-2 text-xs font-medium text-amber-900">25 consecutive failures. Review the response CSV and record who you discussed it with in Upload History.</p>}
+        <a href={`/api/batches/${task.id}/response.csv`} className="mt-2 inline-block text-xs font-medium text-primary underline">Download response CSV</a>
       </div>
     );
   };

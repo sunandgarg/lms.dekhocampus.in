@@ -21,7 +21,7 @@ import { handleAdWebhook, verifyMeta } from './ad-webhooks.mjs';
 import { receiveEmailEvents } from './email-webhook.mjs';
 import { authorizeShortApi, shortAnalytics, shorten } from './short-api.mjs';
 import { retryLeads, runAutoRetries } from './retry.mjs';
-import { enqueueLeads, sealQueue, workQueue, recoverQueue } from './queue.mjs';
+import { enqueueLeads, sealQueue, workQueue, recoverQueue, controlBatch } from './queue.mjs';
 import { Readable } from 'node:stream';
 import { isIP } from 'node:net';
 
@@ -335,6 +335,26 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
           ? await sealQueue(db, queue[1]) : await enqueueLeads(db, queue[1], input.tasks));
       }
 
+      const batchControl = /^\/api\/batches\/([^/]+)\/control$/.exec(url.pathname);
+      if (batchControl && method === 'POST') {
+        if (!await canUpload(db, user)) return send(response, 403, { error: 'Access denied' });
+        checkBatchId(batchControl[1]);
+        await requireOwnedBatch(db, user, batchControl[1]);
+        const { action, discussionWith } = await readJson(request);
+        return send(response, 200, await controlBatch(db, batchControl[1], action, discussionWith));
+      }
+
+      const responseCsv = /^\/api\/batches\/([^/]+)\/response\.csv$/.exec(url.pathname);
+      if (responseCsv && method === 'GET') {
+        checkBatchId(responseCsv[1]);
+        await requireOwnedBatch(db, user, responseCsv[1]);
+        response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="lead-responses-${responseCsv[1]}.csv"`,
+          'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        for await (const row of batchReport(db, responseCsv[1])) response.write(row);
+        return response.end();
+      }
+
       const archive = /^\/api\/batches\/([^/]+)\/archive\.zip$/.exec(url.pathname);
       if (archive && method === 'GET') {
         checkBatchId(archive[1]);
@@ -385,8 +405,7 @@ export async function start() {
   const queueTimer = setInterval(async () => {
     if (queueBusy) return;
     queueBusy = true;
-    try { await Promise.all([workQueue({ db, s3, bucket: process.env.ARCHIVE_BUCKET }),
-      workQueue({ db, s3, bucket: process.env.ARCHIVE_BUCKET })]); }
+    try { await workQueue({ db, s3, bucket: process.env.ARCHIVE_BUCKET }); }
     catch (error) { console.error('Lead queue worker failed:', error); }
     finally { queueBusy = false; }
   }, 1000);

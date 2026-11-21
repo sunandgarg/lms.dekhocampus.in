@@ -557,6 +557,8 @@ export function UploadLeadsTab({
   const [concurrencyPin, setConcurrencyPin] = useState("");
   const [concurrencyPinError, setConcurrencyPinError] = useState("");
   const [isPaused, setIsPaused] = useState(Boolean(persistedProcessing.isPaused));
+  const [safetyPauseReason, setSafetyPauseReason] = useState("");
+  const [discussionWith, setDiscussionWith] = useState("");
   const [isBackgroundPolling, setIsBackgroundPolling] = useState(Boolean(persistedProcessing.isProcessing && persistedState.batchId));
   const [showColumnMapping, setShowColumnMapping] = useState(false);
   // ✅ FIX 1: Local state for the mapping dialog - edits are instant, no persistence lag
@@ -690,13 +692,14 @@ export function UploadLeadsTab({
     try {
       const { data: batch } = await api
         .from("upload_batches")
-        .select("success_count, duplicate_count, fail_count, status, is_paused, is_cancelled, total_leads")
+        .select("success_count, duplicate_count, fail_count, status, is_paused, is_cancelled, total_leads, safety_pause_reason")
         .eq("id", pollBatchId)
         .maybeSingle();
 
     if (!batch) return;
 
       setIsPaused(Boolean(batch.is_paused));
+      setSafetyPauseReason(batch.safety_pause_reason || "");
 
       const processed = (batch.success_count ?? 0) + (batch.duplicate_count ?? 0) + (batch.fail_count ?? 0);
       persistenceRef.current.setState({ processedCount: processed });
@@ -705,7 +708,7 @@ export function UploadLeadsTab({
         batch.status === "completed" ||
         batch.status === "cancelled" ||
         batch.status === "failed" ||
-        (processed >= (batch.total_leads ?? 0) && (batch.total_leads ?? 0) > 0);
+        (processed >= (batch.total_leads ?? 0) && (batch.total_leads ?? 0) > 0 && !batch.is_paused);
 
       if (isBatchComplete) {
         if (pollingRef.current) {
@@ -1894,8 +1897,8 @@ export function UploadLeadsTab({
       if (!mapping) throw new Error('University configuration is unavailable');
       const apiConfig = { columnMapping: mapping.columnMapping,
         customColumnMapping: mapping.customColumnMapping, apiTimeoutSeconds: mapping.apiTimeoutSeconds };
-      for (let start = 0; start < leads.length; start += 10) {
-        const tasks = leads.slice(start, start + 10).map((lead, offset) => ({
+      for (let start = 0; start < leads.length; start += 100) {
+        const tasks = leads.slice(start, start + 100).map((lead, offset) => ({
           index: start + offset,
           apiConfig,
           leadData: {
@@ -2032,28 +2035,39 @@ export function UploadLeadsTab({
     await startBackgroundProcessing();
   }, [selectedUniversity, leads, startBackgroundProcessing, sourceLabel]);
 
-  const pauseProcessing = async () => {
+  const controlBatch = async (action: 'pause' | 'stop' | 'continue') => {
     if (!batchId) return;
-    const { error } = await api.from("upload_batches").update({ is_paused: true, status: "paused" }).eq("id", batchId);
-    if (error) { setAlert({ type: "error", message: `Could not pause processing: ${error.message}` }); return; }
+    const response = await fetch(`/api/batches/${batchId}/control`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, discussionWith }) });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Could not ${action} this batch`);
+    }
+  };
+
+  const pauseProcessing = async () => {
+    if (!isBackgroundPolling) { setAlert({ type: 'warning', message: 'Please wait until all leads are saved to the server queue before pausing.' }); return; }
+    try { await controlBatch('pause'); }
+    catch (error) { setAlert({ type: "error", message: String(error) }); return; }
     pausedRef.current = true;
     setIsPaused(true);
     setAlert({ type: "info", message: "Processing paused. Click resume to continue." });
   };
 
   const resumeProcessing = async () => {
-    if (!batchId) return;
-    const { error } = await api.from("upload_batches").update({ is_paused: false, status: "processing" }).eq("id", batchId);
-    if (error) { setAlert({ type: "error", message: `Could not resume processing: ${error.message}` }); return; }
+    try { await controlBatch('continue'); }
+    catch (error) { setAlert({ type: "error", message: String(error) }); return; }
     pausedRef.current = false;
     setIsPaused(false);
+    setSafetyPauseReason("");
+    setDiscussionWith("");
     setAlert(null);
   };
 
   const stopProcessing = async () => {
     if (!batchId) return;
-    const { error } = await api.from("upload_batches").update({ status: "cancelled", is_cancelled: true }).eq("id", batchId);
-    if (error) { setAlert({ type: "error", message: `Could not stop processing: ${error.message}` }); return; }
+    try { await controlBatch('stop'); }
+    catch (error) { setAlert({ type: "error", message: String(error) }); return; }
     processingRef.current = false;
     pausedRef.current = false;
     activeRunIdRef.current++;
@@ -2188,6 +2202,21 @@ export function UploadLeadsTab({
           <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
         </div>
       )}
+      {safetyPauseReason && isProcessing && (
+        <div role="alert" className="rounded-xl border-2 border-amber-500 bg-amber-50 p-4 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+          <p className="font-bold">25 leads failed consecutively. This batch is paused.</p>
+          <p className="mt-1 text-sm">{safetyPauseReason} Review the response CSV, then record who you discussed it with before continuing.</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input aria-label="Discussed with whom" className="min-h-10 rounded-md border bg-background px-3 text-foreground" placeholder="Discussed with whom?" value={discussionWith} onChange={(event) => setDiscussionWith(event.target.value)} maxLength={120} />
+            <button type="button" className="btn-success min-h-10 px-4" disabled={!discussionWith.trim()} onClick={resumeProcessing}>Continue processing</button>
+            {batchId && <a className="rounded-md border px-3 py-2 text-sm font-medium" href={`/api/batches/${batchId}/response.csv`}>Download response CSV</a>}
+          </div>
+        </div>
+      )}
+      {batchId && <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
+        <span>Processing runs on the server after the full queue is saved. You can close your browser once queuing is complete.</span>
+        <a className="font-semibold text-primary underline" href={`/api/batches/${batchId}/response.csv`}>Download response CSV</a>
+      </div>}
 
       {showUploadActionBar &&
         typeof document !== "undefined" &&
