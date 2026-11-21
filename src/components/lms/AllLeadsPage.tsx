@@ -22,6 +22,7 @@ export interface LmsLead {
   course: string;
   specialization: string;
   source: string;
+  medium: string;
   campaign: string;
   university: string;
   universityId: string;
@@ -52,6 +53,10 @@ function formatDate(iso: string) {
   });
 }
 
+function attributionSource(lead: LmsLead) {
+  return lead.extraData?.utm_source || lead.extraData?.utmSource || lead.source || '-';
+}
+
 function downloadCSV(data: LmsLead[], filename: string) {
   const headers = [
     "Lead ID",
@@ -61,6 +66,7 @@ function downloadCSV(data: LmsLead[], filename: string) {
     "City",
     "Course",
     "Source",
+    "Medium",
     "Campaign",
     "University",
     "Status",
@@ -74,7 +80,8 @@ function downloadCSV(data: LmsLead[], filename: string) {
     l.mobile,
     l.city,
     l.course,
-    l.source,
+    attributionSource(l),
+    l.medium,
     l.campaign,
     l.university,
     l.status,
@@ -125,7 +132,7 @@ export function AllLeadsPage() {
   const [sortCol, setSortCol] = useState<string>("receivedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [showAutomation, setShowAutomation] = useState(false);
+  const [showAutomation, setShowAutomation] = useState(true);
 
   const fetchLeads = useCallback(
     async (_forceRefresh = false) => {
@@ -182,6 +189,7 @@ export function AllLeadsPage() {
           course: l.course || "",
           specialization: l.specialization || "",
           source: l.lead_source || "Manual",
+          medium: l.lead_medium || '',
           campaign: l.lead_campaign || "",
           university: l.universities?.name || "Unknown",
           universityId: l.university_id,
@@ -198,6 +206,7 @@ export function AllLeadsPage() {
           id: lead.id, name: lead.name || '', email: lead.email || '', mobile: lead.mobile || '',
           city: lead.city || '', course: lead.course || '', specialization: '',
           source: lead.source || lead.connection_name || 'Generic API', campaign: lead.campaign || '',
+          medium: lead.extra_data?.utm_medium || lead.extra_data?.lead_medium || lead.extra_data?.medium || '',
           university: lead.batch_ids?.length ? `${lead.batch_ids.length} destinations` : 'Inbox only',
           universityId: '', status: 'Received', failReason: '', receivedAt: lead.created_at,
           apiResponse: '', retryCount: 0, batchId: '', triggerSource: lead.connection_name || 'Generic API',
@@ -236,15 +245,15 @@ export function AllLeadsPage() {
       if (q && !l.name.toLowerCase().includes(q) && !l.email.toLowerCase().includes(q) && !l.mobile.includes(q))
         return false;
       if (statusFilter !== "all" && l.status !== statusFilter) return false;
-      if (sourceFilter !== "all" && l.source !== sourceFilter) return false;
+      if (sourceFilter !== "all" && attributionSource(l) !== sourceFilter) return false;
       if (campaignFilter && !l.campaign.toLowerCase().includes(campaignFilter.toLowerCase())) return false;
       if (universityFilter !== "all" && l.university !== universityFilter) return false;
       if (cityFilter !== "all" && l.city !== cityFilter) return false;
       return true;
     });
     result.sort((a: any, b: any) => {
-      const av = a[sortCol] || "";
-      const bv = b[sortCol] || "";
+      const av = sortCol === 'source' ? attributionSource(a) : a[sortCol] || "";
+      const bv = sortCol === 'source' ? attributionSource(b) : b[sortCol] || "";
       return sortDir === "asc" ? (av > bv ? 1 : -1) : av < bv ? 1 : -1;
     });
     return result;
@@ -289,7 +298,7 @@ export function AllLeadsPage() {
       rate: attempted ? ((pushed / attempted) * 100).toFixed(1) : "0" };
   }, [leads]);
 
-  const sources = useMemo(() => [...new Set(leads.map((l) => l.source).filter(Boolean))], [leads]);
+  const sources = useMemo(() => [...new Set(leads.map(attributionSource).filter((value) => value !== '-'))], [leads]);
   const universities = useMemo(() => [...new Set(leads.map((l) => l.university).filter(Boolean))], [leads]);
   const cities = useMemo(() => [...new Set(leads.map((l) => l.city).filter(Boolean))], [leads]);
 
@@ -401,7 +410,7 @@ export function AllLeadsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowAutomation(!showAutomation)} aria-expanded={showAutomation}>
-            <Zap className="mr-2 h-4 w-4" /> Automation {showAutomation ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
+            <Zap className="mr-2 h-4 w-4" /> Lead push automation {showAutomation ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
           </Button>
           <Button variant="outline" size="sm" onClick={() => fetchLeads(true)} disabled={loading}>
             <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -472,30 +481,33 @@ export function AllLeadsPage() {
 
         <div className="overflow-x-auto">
           {loading ? <div className="flex items-center justify-center py-16 text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading leads...</div> :
-          <Table className="min-w-[1050px]">
+          <Table className="min-w-[1280px]">
             <TableHeader><TableRow className="table-header">
               <TableHead className="w-10"><Checkbox aria-label="Select all matching submissions" checked={filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>
-              {sortHeader('Latest activity','receivedAt')}
-              {sortHeader('Student','name')}
-              <TableHead>Study interest</TableHead>
+              {sortHeader('Name','name')}
+              <TableHead>Email</TableHead>
+              <TableHead>Mobile</TableHead>
               {sortHeader('Source','source')}
-              <TableHead>Location</TableHead>
-              <TableHead>Destination / delivery</TableHead>
+              <TableHead>Medium</TableHead>
+              <TableHead>Campaign</TableHead>
+              {sortHeader('Received','receivedAt')}
+              <TableHead>Delivery</TableHead>
               <TableHead className="w-24">History</TableHead>
               <TableHead className="w-28 text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {grouped.length === 0 ? <TableRow><TableCell colSpan={9} className="py-16 text-center text-muted-foreground">
+              {grouped.length === 0 ? <TableRow><TableCell colSpan={11} className="py-16 text-center text-muted-foreground">
                 <Inbox className="mx-auto mb-3 h-8 w-8 opacity-40" /><p className="font-medium text-foreground">No matching leads</p><p className="mt-1 text-sm">Try another filter or refresh to check new enquiries.</p>
               </TableCell></TableRow> : grouped.flatMap(({ key, items, latest, firstAt }) =>
                 (expanded.has(key) ? items : [latest]).map((lead, index) => <TableRow key={lead.id} className={index > 0 ? 'bg-muted/20' : 'hover:bg-muted/30'}>
                   <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>
+                  <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button></TableCell>
+                  <TableCell className="max-w-[220px] truncate align-top text-sm" title={lead.email}>{lead.email || '-'}</TableCell>
+                  <TableCell className="whitespace-nowrap align-top text-sm">{lead.mobile || '-'}</TableCell>
+                  <TableCell className="align-top"><Badge variant="outline" className="max-w-[150px] truncate">{attributionSource(lead)}</Badge></TableCell>
+                  <TableCell className="align-top text-sm">{lead.medium || field(lead,'utm_medium','utmMedium')}</TableCell>
+                  <TableCell className="max-w-[200px] truncate align-top text-sm" title={lead.campaign}>{lead.campaign || field(lead,'utm_campaign','utmCampaign')}</TableCell>
                   <TableCell className="whitespace-nowrap align-top"><div className="text-sm font-medium tabular-nums">{formatDate(lead.receivedAt)}</div><div className="mt-1 text-xs text-muted-foreground">{index > 0 ? 'Earlier submission' : 'Most recent'}</div></TableCell>
-                  <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button>
-                    <div className="mt-1 max-w-[230px] truncate text-xs text-muted-foreground" title={lead.email}>{lead.email || 'No email'}</div><div className="text-xs text-muted-foreground">{lead.mobile || 'No mobile'}</div></TableCell>
-                  <TableCell className="align-top"><div className="max-w-[180px] truncate text-sm font-medium" title={lead.course || field(lead,'interest','program')}>{lead.course || field(lead,'interest','program')}</div><div className="mt-1 text-xs text-muted-foreground">{field(lead,'campus') !== '-' ? field(lead,'campus') : field(lead,'exam')}</div></TableCell>
-                  <TableCell className="align-top"><Badge variant="outline" className="max-w-[150px] truncate">{lead.source || 'Unknown'}</Badge><div className="mt-1 max-w-[170px] truncate text-xs text-muted-foreground" title={lead.campaign}>{lead.campaign || field(lead,'utm_campaign','utmCampaign')}</div></TableCell>
-                  <TableCell className="align-top text-sm">{[lead.city,field(lead,'state')].filter((value) => value && value !== '-').join(', ') || '-'}</TableCell>
                   <TableCell className="align-top"><div className="flex flex-wrap items-center gap-2">{statusBadge(lead.status)}<span className="max-w-[170px] truncate text-xs text-muted-foreground" title={lead.university}>{lead.university}</span></div>
                     {lead.failReason && <p className="mt-1 max-w-[240px] truncate text-xs text-destructive" title={lead.failReason}>{lead.failReason}</p>}</TableCell>
                   <TableCell className="align-top">{index === 0 && items.length > 1 ? <button type="button" aria-expanded={expanded.has(key)} aria-label={`${expanded.has(key) ? 'Collapse' : 'Expand'} ${items.length} submissions for ${lead.name || 'this contact'}`}
@@ -534,7 +546,7 @@ export function AllLeadsPage() {
                 </section>
                 <section className="space-y-3"><h3 className="border-b pb-2 text-sm font-semibold">Source and campaign</h3>
                   <dl className="grid grid-cols-2 gap-3">{[
-                    ['Source',detailLead.source],['Connection',detailLead.triggerSource],['Campaign',detailLead.campaign],
+                    ['Source',detailLead.source],['Medium',detailLead.medium],['Connection',detailLead.triggerSource],['Campaign',detailLead.campaign],
                     ['UTM source',field(detailLead,'utm_source','utmSource')],['UTM medium',field(detailLead,'utm_medium','utmMedium')],
                     ['UTM campaign',field(detailLead,'utm_campaign','utmCampaign')],['CTA source',field(detailLead,'cta_source','ctaSource')],
                     ['Landing page',field(detailLead,'landing_page','landingPage')],['Page',field(detailLead,'page','page_url','pageUrl')],

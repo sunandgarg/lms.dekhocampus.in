@@ -424,6 +424,7 @@
     "conditions",
     "created_at",
     "destination_ids",
+    "field_overrides",
     "id",
     "last_triggered_at",
     "match_mode",

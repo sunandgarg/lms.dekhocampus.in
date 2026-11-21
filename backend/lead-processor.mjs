@@ -5,6 +5,7 @@ import { buildPayload, categorizeResponse } from './lead-payload.mjs';
 import { executeRecords } from './records.mjs';
 import { syncLeadToCrm } from './crm-sync.mjs';
 import { updateLeadStats } from './stats.mjs';
+import { mergePartnerMapping } from './inbound-field-overrides.mjs';
 
 let activeDeliveries = 0;
 const waitingDeliveries = [];
@@ -59,7 +60,7 @@ function universityConfig(university, browserConfig = {}) {
     medium: university.medium || '',
     campaign: university.campaign || '',
     apiType: university.api_type || 'generic',
-    columnMapping: asObject(browserConfig.columnMapping || university.column_mapping),
+    columnMapping: mergePartnerMapping(asObject(university.column_mapping), asObject(browserConfig.columnMapping)),
     customColumnMapping: asObject(browserConfig.customColumnMapping),
     payloadWrapper: university.payload_wrapper || 'object',
     authType: university.auth_type || 'secret_key',

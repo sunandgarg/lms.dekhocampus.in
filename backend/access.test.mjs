@@ -13,11 +13,16 @@ test('team users only read their own lead history', async () => {
 });
 
 test('team users cannot read partner credentials', async () => {
-  const db = { execute: async () => [[{ data: { id: 'x', secret_key: 'private', auth_header_value: 'secret', custom_headers: { Key: 'secret' } } }]] };
+  const db = { execute: async () => [[{ data: { id: 'x', secret_key: 'private', auth_header_value: 'secret', custom_headers: { Key: 'secret' },
+    column_mapping: { __static_AccessKey: 'private', __field_key: JSON.stringify({ fieldName: 'AccessKey', sourceType: 'static', staticValue: 'private' }) },
+    default_values: { AccessKey: 'private', campus: 'Noida' } } }]] };
   const result = await userRecords(db, user, { table: 'universities', select: '*' });
   assert.equal(result.data[0].secret_key, '');
   assert.equal(result.data[0].auth_header_value, '');
   assert.deepEqual(result.data[0].custom_headers, {});
+  assert.equal(result.data[0].column_mapping.__static_AccessKey, '');
+  assert.equal(JSON.parse(result.data[0].column_mapping.__field_key).staticValue, '');
+  assert.deepEqual(result.data[0].default_values, { campus: 'Noida' });
 });
 
 test('team users cannot edit university configuration', async () => {

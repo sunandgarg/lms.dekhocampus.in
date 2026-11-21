@@ -1,4 +1,5 @@
 import { executeRecords } from './records.mjs';
+import { redactPartnerMapping, sensitivePartnerField } from './inbound-field-overrides.mjs';
 
 const CONFIG_READ = new Set([
   'universities', 'programs', 'state_cities', 'course_specializations',
@@ -36,6 +37,21 @@ function hideCredentials(result) {
     const clean = { ...row };
     for (const field of ['secret_key', 'auth_header_value', 'custom_headers']) {
       if (field in clean) clean[field] = field === 'custom_headers' ? {} : '';
+    }
+    if (clean.column_mapping) {
+      let mapping = clean.column_mapping;
+      if (typeof mapping === 'string') {
+        try { mapping = JSON.parse(mapping); } catch { mapping = {}; }
+      }
+      clean.column_mapping = redactPartnerMapping(mapping);
+    }
+    if (clean.default_values) {
+      let defaults = clean.default_values;
+      if (typeof defaults === 'string') {
+        try { defaults = JSON.parse(defaults); } catch { defaults = {}; }
+      }
+      clean.default_values = defaults && typeof defaults === 'object' && !Array.isArray(defaults)
+        ? Object.fromEntries(Object.entries(defaults).filter(([key]) => !sensitivePartnerField(key))) : {};
     }
     return clean;
   };

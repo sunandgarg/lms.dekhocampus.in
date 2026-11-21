@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { executeRecords } from './records.mjs';
 import { saveSourceFile } from './archive.mjs';
 import { matchingInboundRules } from './inbound-routing.mjs';
+import { applyInboundFieldOverrides } from './inbound-field-overrides.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FIELDS = ['name', 'email', 'mobile', 'source', 'medium', 'campaign', 'course', 'city', 'state'];
@@ -25,12 +26,12 @@ function settings(input) {
 }
 
 async function existingDestinations(db, ids) {
-  const found = new Set();
+  const found = new Map();
   for (let start = 0; start < ids.length; start += 500) {
     const group = ids.slice(start, start + 500);
-    const { data } = await executeRecords(db, { table: 'universities', select: 'id',
+    const { data } = await executeRecords(db, { table: 'universities', select: 'id,column_mapping',
       filters: [{ field: 'id', op: 'in', value: group }], limit: group.length });
-    for (const row of data) found.add(row.id);
+    for (const row of data) found.set(row.id, row);
   }
   return found;
 }
@@ -147,6 +148,12 @@ export async function receiveCapturedLead({ db, s3, bucket, connection, payload,
   for (const rule of matchedRules) for (const universityId of rule.destination_ids) {
     if (UUID.test(universityId) && !destinations.has(universityId)) destinations.set(universityId, rule.name);
   }
+  const routeSettings = new Map();
+  for (const rule of matchedRules) for (const universityId of rule.destination_ids) {
+    if (!routeSettings.has(universityId) && rule.field_overrides?.[universityId]) {
+      routeSettings.set(universityId, rule.field_overrides[universityId]);
+    }
+  }
   const existing = await existingDestinations(db, [...destinations.keys()]);
   const skippedDestinations = [...destinations.keys()].filter((id) => !existing.has(id));
   for (const id of skippedDestinations) destinations.delete(id);
@@ -184,7 +191,8 @@ export async function receiveCapturedLead({ db, s3, bucket, connection, payload,
         source_label: lead.source,
       } });
       const task = { universityId, batchId, leadIndex: 0, sourceLabel: lead.source,
-        leadData: { ...leadData, inbound_lead_id: id } };
+        leadData: { ...leadData, inbound_lead_id: id },
+        apiConfig: applyInboundFieldOverrides(leadData, payload, existing.get(universityId), routeSettings.get(universityId)) || undefined };
       await transaction.execute('INSERT INTO lms_lead_queue (batch_id, lead_index, task) VALUES (?, 0, ?)',
         [batchId, JSON.stringify(task)]);
     }
