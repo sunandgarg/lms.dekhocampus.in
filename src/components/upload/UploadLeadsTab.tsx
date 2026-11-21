@@ -505,6 +505,8 @@ export function UploadLeadsTab({
   const [isProcessing, setIsProcessing] = useState(Boolean(persistedProcessing.isProcessing && persistedState.batchId));
   const [isPaused, setIsPaused] = useState(Boolean(persistedProcessing.isPaused));
   const [batchStatus, setBatchStatus] = useState('');
+  const [batchCounts, setBatchCounts] = useState({ success: 0, failed: 0, duplicates: 0, processed: 0, total: 0 });
+  const [partnerMessage, setPartnerMessage] = useState('');
   const [batchRate, setBatchRate] = useState(() => clampUniversityNumber(selectedUniversity?.leads_per_minute, 60, 1, 100));
   const [safetyPauseReason, setSafetyPauseReason] = useState("");
   const [discussionWith, setDiscussionWith] = useState("");
@@ -634,26 +636,64 @@ export function UploadLeadsTab({
 
   // ========== POLLING: Real-time batch & lead status sync from DB ==========
   // Uses refs to avoid stale closures - this function is stable and never recreated
-  // Simplified polling - only reads batch aggregate counts (no leads table)
+  // Read server totals and the visible preview rows; local browser state is not the delivery source of truth.
   const pollBatchProgress = useCallback(async (pollBatchId: string) => {
     if (isPollingInFlightRef.current) return;
     isPollingInFlightRef.current = true;
 
     try {
-      const { data: batch } = await api
+      const { data: batch, error: batchError } = await api
         .from("upload_batches")
         .select("success_count, duplicate_count, fail_count, status, is_paused, is_cancelled, total_leads, safety_pause_reason")
         .eq("id", pollBatchId)
         .maybeSingle();
 
-    if (!batch) return;
+      if (batchError) throw batchError;
+      if (!batch) throw new Error('Batch status was not found');
 
       setIsPaused(Boolean(batch.is_paused));
       setBatchStatus(batch.status || '');
       setSafetyPauseReason(batch.safety_pause_reason || "");
 
-      const processed = (batch.success_count ?? 0) + (batch.duplicate_count ?? 0) + (batch.fail_count ?? 0);
-      persistenceRef.current.setState({ processedCount: processed });
+      const success = Number(batch.success_count || 0);
+      const failed = Number(batch.fail_count || 0);
+      const duplicates = Number(batch.duplicate_count || 0);
+      const processed = success + failed + duplicates;
+      setBatchCounts({ success, failed, duplicates, processed, total: Number(batch.total_leads || 0) });
+
+      const { data: results, error: resultError } = await api.from('leads')
+        .select('status,api_response,extra_data').eq('batch_id', pollBatchId)
+        .order('created_at', { ascending: true }).limit(Math.min(pageSize, 100));
+      if (resultError) console.error('[Polling] Could not load preview responses:', resultError);
+      const statuses = { ...persistenceRef.current.state.leadStatuses };
+      const responses = { ...persistenceRef.current.state.leadResponses };
+      if (!resultError) {
+        for (const result of results || []) {
+          const index = Number(result.extra_data?.lead_index);
+          if (!Number.isInteger(index) || index < 0) continue;
+          statuses[index] = result.status === 'Success' ? 'success'
+            : result.status === 'Duplicate' ? 'duplicate' : 'failed';
+          responses[index] = String(result.api_response || 'No partner response');
+        }
+      }
+      persistenceRef.current.setState({ processedCount: processed, leadStatuses: statuses, leadResponses: responses });
+
+      let partnerExample = '';
+      if (failed > 0) {
+        const { data: rejected } = await api.from('leads').select('api_response')
+          .eq('batch_id', pollBatchId).eq('status', 'Fail').limit(1);
+        const response = String(rejected?.[0]?.api_response || '');
+        if (response) {
+          try {
+            const parsed = JSON.parse(response);
+            partnerExample = String(parsed?.message || parsed?.error || response);
+          } catch {
+            partnerExample = response;
+          }
+          partnerExample = partnerExample.replace(/\s+/g, ' ').slice(0, 160);
+        }
+      }
+      setPartnerMessage(partnerExample);
 
       const isBatchComplete =
         batch.status === "completed" ||
@@ -670,24 +710,6 @@ export function UploadLeadsTab({
         setIsProcessing(false);
         setIsPaused(false);
 
-        const success = batch.success_count ?? 0;
-        const failed = batch.fail_count ?? 0;
-        const duplicates = batch.duplicate_count ?? 0;
-        let partnerExample = '';
-        if (failed > 0) {
-          const { data: rejected } = await api.from('leads').select('api_response')
-            .eq('batch_id', pollBatchId).eq('status', 'Fail').limit(1);
-          const response = String(rejected?.[0]?.api_response || '');
-          if (response) {
-            try {
-              const parsed = JSON.parse(response);
-              partnerExample = String(parsed?.message || parsed?.error || response);
-            } catch {
-              partnerExample = response;
-            }
-            partnerExample = partnerExample.replace(/\s+/g, ' ').slice(0, 160);
-          }
-        }
         const counts = `Accepted: ${success}, Duplicate: ${duplicates}, Rejected: ${failed}.`;
         const rejection = partnerExample ? ` Partner response example: ${partnerExample}` : '';
         setAlert({
@@ -702,10 +724,11 @@ export function UploadLeadsTab({
       }
     } catch (error) {
       console.error("[Polling] Error:", error);
+      setAlert({ type: 'warning', message: `Could not refresh the server response: ${error instanceof Error ? error.message : String(error)}. Use Upload History to check the batch.` });
     } finally {
       isPollingInFlightRef.current = false;
     }
-  }, []);
+  }, [pageSize]);
 
   // Start/stop polling when background processing state changes
   useEffect(() => {
@@ -727,6 +750,10 @@ export function UploadLeadsTab({
         pollingRef.current = null;
       }
     };
+  }, [batchId, isBackgroundPolling, pollBatchProgress]);
+
+  useEffect(() => {
+    if (batchId && !isBackgroundPolling) pollBatchProgress(batchId);
   }, [batchId, isBackgroundPolling, pollBatchProgress]);
 
   // If the upload view remounts during an active push, restore the visible
@@ -1653,6 +1680,10 @@ export function UploadLeadsTab({
       }
 
       setLeads(mappedLeads);
+      setBatchId(null);
+      setBatchStatus('');
+      setBatchCounts({ success: 0, failed: 0, duplicates: 0, processed: 0, total: 0 });
+      setPartnerMessage('');
       setLeadStatuses(new Map());
       setLeadResponses(new Map());
       setDbDuplicates(new Set());
@@ -1813,6 +1844,10 @@ export function UploadLeadsTab({
   // Save the source and queue first; the server continues delivery if this tab closes.
   const startBackgroundProcessing = async (scheduledAt?: Date) => {
     if (!selectedUniversity?.detailsLoaded || leads.length === 0) return;
+    if (batchId) {
+      setAlert({ type: 'warning', message: 'This file already has a server batch. Check Upload History and its response CSV before starting a new upload.' });
+      return;
+    }
 
     processingRef.current = true;
     const runId = ++activeRunIdRef.current;
@@ -1967,6 +2002,10 @@ export function UploadLeadsTab({
   }, [selectedUniversity, tempColumnMapping]);
 
   const processLeads = useCallback(async () => {
+    if (batchId) {
+      setAlert({ type: 'warning', message: 'This file already has a server batch. Check Upload History and its response CSV before starting a new upload.' });
+      return;
+    }
     if (!selectedUniversity?.detailsLoaded || leads.length === 0) {
       if (selectedUniversity && !selectedUniversity.detailsLoaded) {
         setAlert({ type: "error", message: "University settings are still loading. Please try again." });
@@ -1992,7 +2031,7 @@ export function UploadLeadsTab({
       message: `Queuing ${leads.length} leads for background processing...`,
     });
     await startBackgroundProcessing();
-  }, [selectedUniversity, leads, startBackgroundProcessing, sourceLabel]);
+  }, [batchId, selectedUniversity, leads, startBackgroundProcessing, sourceLabel]);
 
   const controlBatch = async (action: 'pause' | 'stop' | 'continue') => {
     if (!batchId) return;
@@ -2063,6 +2102,8 @@ export function UploadLeadsTab({
     setIsProcessing(false);
     setIsPaused(false);
     setBatchStatus('');
+    setBatchCounts({ success: 0, failed: 0, duplicates: 0, processed: 0, total: 0 });
+    setPartnerMessage('');
     setStartTime(null);
     currentIndexRef.current = 0;
     setCsvHeaders([]);
@@ -2084,12 +2125,13 @@ export function UploadLeadsTab({
     }
   };
 
-  const rawFailedCount = [...leadStatuses.values()].filter((s) => s === "failed").length;
-  const duplicateCount = [...leadStatuses.values()].filter((s) => s === "duplicate").length;
-  const successCount = [...leadStatuses.values()].filter((s) => s === "success").length;
+  const rawFailedCount = Math.max([...leadStatuses.values()].filter((s) => s === "failed").length, batchCounts.failed);
+  const duplicateCount = Math.max([...leadStatuses.values()].filter((s) => s === "duplicate").length, batchCounts.duplicates);
+  const successCount = Math.max([...leadStatuses.values()].filter((s) => s === "success").length, batchCounts.success);
   const failedCount = rawFailedCount + duplicateCount;
-  const processedDisplayCount = successCount + failedCount;
-  const pendingCount = Math.max(leads.length - processedDisplayCount, 0);
+  const processedDisplayCount = Math.max(successCount + failedCount, processedCount, batchCounts.processed);
+  const totalDisplayCount = leads.length || batchCounts.total;
+  const pendingCount = Math.max(totalDisplayCount - processedDisplayCount, 0);
 
   const getEstimatedTime = () => {
     if (!startTime || !selectedUniversity) return null;
@@ -2144,6 +2186,9 @@ export function UploadLeadsTab({
         createPortal(
           <>
             <div className="fixed inset-x-0 bottom-0 z-40 max-h-[55vh] overflow-y-auto border-t border-border bg-card px-4 py-3 shadow-2xl">
+              {alert && <p role="alert" className={`mx-auto mb-3 max-w-6xl rounded-md border px-3 py-2 text-sm ${alert.type === 'error' ? 'border-destructive/40 bg-destructive/10 text-destructive' : 'border-amber-300 bg-amber-50 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100'}`}>
+                {alert.message}
+              </p>}
               <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-foreground">
@@ -2208,13 +2253,13 @@ export function UploadLeadsTab({
                       setScheduleDate(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`);
                       setScheduleTime(`${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`);
                       setShowScheduleModal(true);
-                    }} disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || isAllProcessed}
+                    }} disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || hasValidationErrors || isAllProcessed}
                       className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg border px-4 font-medium disabled:opacity-50 sm:flex-none">
                       <CalendarClock className="h-4 w-4" /> Schedule
                     </button>
                     <button
                       onClick={processLeads}
-                      disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || isAllProcessed}
+                      disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || isAllProcessed}
                       className="btn-success flex min-h-12 flex-1 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                     >
                       <Rocket className="h-5 w-5" />
@@ -2380,7 +2425,7 @@ export function UploadLeadsTab({
                 {!isProcessing ? (
                   <button
                     onClick={processLeads}
-                    disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || processedDisplayCount === leads.length}
+                    disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || processedDisplayCount === leads.length}
                     className="btn-success flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Rocket className="h-5 w-5" />
@@ -2524,7 +2569,7 @@ export function UploadLeadsTab({
                   </div>
                   <button
                     onClick={processLeads}
-                    disabled={!selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0}
+                    disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0}
                     className="btn-success flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Rocket className="h-5 w-5" />
@@ -2582,10 +2627,13 @@ export function UploadLeadsTab({
             <UniversityInfoPanel university={selectedUniversity} onRateLimitUpdate={handleRateLimitUpdate} />
           )}
 
-          {leads.length > 0 && (
+          {(leads.length > 0 || batchId) && (
             <div className="card-elevated p-6">
               <h3 className="font-medium text-foreground mb-4">Processing Status</h3>
-              {!isProcessing && <label className="mb-4 block rounded-lg border bg-muted/20 p-3 text-sm font-medium text-foreground">
+              {selectedUniversity && <p className="mb-2 break-all text-sm text-muted-foreground">Destination: <span className="font-medium text-foreground">{selectedUniversity.name}</span>{selectedUniversity.api_url && <> · {selectedUniversity.api_url}</>}</p>}
+              {batchId && <p className="mb-4 text-sm text-muted-foreground">Server status: <span className="font-medium capitalize text-foreground">{batchStatus || 'checking'}</span></p>}
+              {partnerMessage && <p role="status" className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">Partner response: {partnerMessage}</p>}
+              {!isProcessing && leads.length > 0 && <label className="mb-4 block rounded-lg border bg-muted/20 p-3 text-sm font-medium text-foreground">
                 Leads per minute for this run
                 <input type="number" min={1} max={100} step={1} className="input-field mt-2 w-28" value={batchRate}
                   onChange={(event) => setBatchRate(clampUniversityNumber(event.target.value, 60, 1, 100))} />
@@ -2596,13 +2644,13 @@ export function UploadLeadsTab({
                 <div className="flex items-center justify-between text-sm mb-2">
                   <span className="text-muted-foreground">Progress</span>
                   <span className="font-mono text-foreground">
-                    {processedDisplayCount} / {leads.length}
+                    {processedDisplayCount} / {totalDisplayCount}
                   </span>
                 </div>
                 <div className="progress-bar">
                   <div
                     className="progress-bar-fill"
-                    style={{ width: `${leads.length > 0 ? (processedDisplayCount / leads.length) * 100 : 0}%` }}
+                    style={{ width: `${totalDisplayCount > 0 ? Math.min(100, (processedDisplayCount / totalDisplayCount) * 100) : 0}%` }}
                   />
                 </div>
                 {isProcessing && !isPaused && getEstimatedTime() && (
@@ -2629,20 +2677,23 @@ export function UploadLeadsTab({
               </div>
 
               <div className="space-y-2">
-                {!isProcessing ? (
+                {leads.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">This batch runs on the server. Open Upload History to review each result and download the response CSV.</p>
+                ) : !isProcessing ? (
                   <>
                     <button
                       onClick={processLeads}
                       className="btn-success w-full flex items-center justify-center gap-2"
-                      disabled={processedDisplayCount === leads.length}
+                      disabled={Boolean(batchId) || hasValidationErrors || processedDisplayCount > 0 || !selectedUniversity?.detailsLoaded}
                     >
                       <Rocket className="h-5 w-5" />
-                      {processedDisplayCount > 0 ? "Continue Processing" : "Process Now (Live)"}
+                      Process Now
                     </button>
                     {processedDisplayCount === 0 && (
                       <>
                         <button
                           onClick={() => startBackgroundProcessing()}
+                          disabled={Boolean(batchId)}
                           className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium border border-primary text-primary hover:bg-primary/10"
                         >
                           <Clock className="h-5 w-5" />
@@ -2657,6 +2708,7 @@ export function UploadLeadsTab({
                             setScheduleTime(defaultTime);
                             setShowScheduleModal(true);
                           }}
+                          disabled={Boolean(batchId)}
                           className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium border border-accent text-accent-foreground hover:bg-accent/10 bg-accent/5"
                         >
                           <CalendarClock className="h-5 w-5" />
