@@ -106,38 +106,26 @@ export function validateLeads(leads: Lead[], config?: LeadValidationConfig): {
   const validLeads: Lead[] = [];
   const invalidLeads: { lead: Lead; errors: string[]; index: number }[] = [];
   
-  // Track duplicates by email and mobile
-  const seenEmails = new Map<string, number>();
-  const seenMobiles = new Map<string, number>();
+  // An incoming submission is a duplicate only when both contact fields match.
+  const seenContacts = new Map<string, number>();
   const duplicateIndices = new Set<number>();
 
   leads.forEach((lead, index) => {
     const validation = validateLead(lead, config);
     const errors = [...validation.errors];
 
-    // Check for duplicate email
     const normalizedEmail = lead.email?.trim().toLowerCase();
-    if (normalizedEmail) {
-      const existingIndex = seenEmails.get(normalizedEmail);
+    const mobileDigits = lead.mobile?.replace(/\D/g, '') || '';
+    const normalizedMobile = mobileDigits.length >= 10 ? mobileDigits.slice(-10) : '';
+    if (normalizedEmail && normalizedMobile) {
+      const contactKey = `${normalizedEmail}\0${normalizedMobile}`;
+      const existingIndex = seenContacts.get(contactKey);
       if (existingIndex !== undefined) {
-        errors.push(`Duplicate email (same as row ${existingIndex + 1})`);
+        errors.push(`Duplicate email and mobile (same as row ${existingIndex + 1})`);
         duplicateIndices.add(index);
         duplicateIndices.add(existingIndex);
       } else {
-        seenEmails.set(normalizedEmail, index);
-      }
-    }
-
-    // Check for duplicate mobile
-    const normalizedMobile = lead.mobile?.replace(/[\s\-().+]/g, '');
-    if (normalizedMobile) {
-      const existingIndex = seenMobiles.get(normalizedMobile);
-      if (existingIndex !== undefined) {
-        errors.push(`Duplicate mobile (same as row ${existingIndex + 1})`);
-        duplicateIndices.add(index);
-        duplicateIndices.add(existingIndex);
-      } else {
-        seenMobiles.set(normalizedMobile, index);
+        seenContacts.set(contactKey, index);
       }
     }
 

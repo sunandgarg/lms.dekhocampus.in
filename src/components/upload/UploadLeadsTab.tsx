@@ -524,6 +524,7 @@ export function UploadLeadsTab({
   const [universityLoadError, setUniversityLoadError] = useState(false);
   const [customPageSize, setCustomPageSize] = useState<string>("");
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showOnlyInvalid, setShowOnlyInvalid] = useState(false);
   const [scheduleDate, setScheduleDate] = useState<string>("");
   const [scheduleTime, setScheduleTime] = useState<string>("");
   const [isScheduling, setIsScheduling] = useState(false);
@@ -1677,6 +1678,7 @@ export function UploadLeadsTab({
       });
 
       setValidationErrors(errorMap);
+      setShowOnlyInvalid(errorMap.size > 0);
 
       if (invalidLeads.length > 0) {
         setAlert({
@@ -1780,6 +1782,7 @@ export function UploadLeadsTab({
     const newLeads = [...leads];
     newLeads[index] = updatedLead;
     setLeads(newLeads);
+    setDbDuplicates(new Set());
 
     const newPayloads = new Map(leadPayloads);
     newPayloads.set(index, buildMappedPayloadPreview(updatedLead));
@@ -1790,16 +1793,10 @@ export function UploadLeadsTab({
           customColumns: selectedUniversity.customColumns,
         })
       : undefined;
-    const { invalidLeads } = validateLeads([updatedLead], validationConfig);
-    const newErrors = new Map(validationErrors);
-
-    if (invalidLeads.length > 0) {
-      newErrors.set(index, invalidLeads[0].errors);
-    } else {
-      newErrors.delete(index);
-    }
-
+    const { invalidLeads } = validateLeads(newLeads, validationConfig);
+    const newErrors = new Map(invalidLeads.map(({ index: row, errors }) => [row, errors]));
     setValidationErrors(newErrors);
+    if (newErrors.size === 0) setShowOnlyInvalid(false);
   };
 
   const exportFailedLeads = () => {
@@ -1829,7 +1826,8 @@ export function UploadLeadsTab({
     URL.revokeObjectURL(url);
   };
 
-  const createBatch = async (status: string = "uploading", scheduledAt?: Date) => {
+  const createBatch = async (status: string = "uploading", scheduledAt?: Date,
+    runSourceLabel = sourceLabel.trim() || fileName || 'CSV upload') => {
     if (!selectedUniversity?.detailsLoaded) return null;
 
     // Don't save CSV data to reduce storage usage
@@ -1845,7 +1843,7 @@ export function UploadLeadsTab({
         is_cancelled: false,
         processed_count: 0,
         current_lead_index: 0,
-        source_label: sourceLabel.trim() || null,
+        source_label: runSourceLabel.trim() || null,
         scheduled_at: scheduledAt?.toISOString() || null,
         leads_per_minute: batchRate,
       })
@@ -1857,8 +1855,10 @@ export function UploadLeadsTab({
   };
 
   // Save the source and queue first; the server continues delivery if this tab closes.
-  const startBackgroundProcessing = async (scheduledAt?: Date) => {
+  const startBackgroundProcessing = async (scheduledAt?: Date,
+    runSourceLabel = sourceLabel.trim() || fileName || 'CSV upload') => {
     if (!selectedUniversity?.detailsLoaded || leads.length === 0) return;
+    if (processingRef.current) return;
     if (batchId) {
       setAlert({ type: 'warning', message: 'This file already has a server batch. Check Upload History and its response CSV before starting a new upload.' });
       return;
@@ -1870,12 +1870,12 @@ export function UploadLeadsTab({
     setStartTime(Date.now());
     setAlert({
       type: "info",
-      message: `Saving ${leads.length} leads to the server in groups of 100. Keep this page open until queued.`,
+      message: `Saving ${leads.length} leads to the server in groups of 100. Keep this page open until queued.${validationErrors.size ? ` ${validationErrors.size} rows have validation warnings and may be rejected by the university.` : ''}`,
     });
 
     let newBatchId: string | null = null;
     try {
-      newBatchId = await createBatch("uploading", scheduledAt);
+      newBatchId = await createBatch("uploading", scheduledAt, runSourceLabel);
       if (!newBatchId) {
         setAlert({ type: "error", message: "Failed to create batch" });
         setIsProcessing(false);
@@ -1957,10 +1957,9 @@ export function UploadLeadsTab({
       return;
     }
 
-    if (!sourceLabel.trim()) { setAlert({ type: 'error', message: 'Enter Source of Data before scheduling.' }); return; }
     setIsScheduling(true);
     try {
-      await startBackgroundProcessing(scheduledAt);
+      await startBackgroundProcessing(scheduledAt, sourceLabel.trim() || fileName || 'CSV upload');
     } catch (error) {
       console.error("Schedule error:", error);
       setAlert({ type: "error", message: "Failed to schedule: " + String(error) });
@@ -2016,7 +2015,8 @@ export function UploadLeadsTab({
     };
   }, [selectedUniversity, tempColumnMapping]);
 
-  const processLeads = useCallback(async () => {
+  const processLeads = async () => {
+    if (processingRef.current) return;
     if (batchId) {
       setAlert({ type: 'warning', message: 'This file already has a server batch. Check Upload History and its response CSV before starting a new upload.' });
       return;
@@ -2028,15 +2028,9 @@ export function UploadLeadsTab({
       return;
     }
 
-    if (!sourceLabel.trim()) {
-      setAlert({
-        type: "error",
-        message: "Please enter a Source of Data before pushing (e.g. 'Meta Ads – Jan campaign').",
-      });
-      return;
-    }
+    const runSourceLabel = sourceLabel.trim() || fileName || 'CSV upload';
     try {
-      localStorage.setItem("upload:lastSourceLabel", sourceLabel.trim());
+      localStorage.setItem("upload:lastSourceLabel", runSourceLabel);
     } catch {
       /* ignore */
     }
@@ -2045,8 +2039,8 @@ export function UploadLeadsTab({
       type: "info",
       message: `Queuing ${leads.length} leads for background processing...`,
     });
-    await startBackgroundProcessing();
-  }, [batchId, selectedUniversity, leads, startBackgroundProcessing, sourceLabel]);
+    await startBackgroundProcessing(undefined, runSourceLabel);
+  };
 
   const controlBatch = async (action: 'pause' | 'stop' | 'continue') => {
     if (!batchId) return;
@@ -2111,6 +2105,7 @@ export function UploadLeadsTab({
     setLeadResponses(new Map());
     setLeadPayloads(new Map());
     setValidationErrors(new Map());
+    setShowOnlyInvalid(false);
     setDbDuplicates(new Set());
     setProcessedCount(0);
     setBatchId(null);
@@ -2221,7 +2216,7 @@ export function UploadLeadsTab({
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {hasValidationErrors
-                      ? "Fix validation errors before pushing."
+                      ? `${validationErrors.size} rows have warnings. Process sends every row; edit warnings first if needed.`
                       : hasLoadedLeads
                         ? "Action buttons stay visible here while you review the preview."
                         : selectedUniversity
@@ -2233,7 +2228,7 @@ export function UploadLeadsTab({
                 {hasLoadedLeads && (
                   <div className="mb-3 w-full sm:max-w-md">
                     <label className="mb-1 block text-xs font-medium text-foreground">
-                      Source of Data <span className="text-destructive">*</span>
+                      Source of Data <span className="font-normal text-muted-foreground">(optional)</span>
                     </label>
                     <input
                       type="text"
@@ -2243,7 +2238,7 @@ export function UploadLeadsTab({
                       className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none"
                     />
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      Saved on the batch so you can find this push later by source name.
+                      Saved on the batch so you can find this push later. The CSV name is used if left blank.
                     </p>
                     {!isProcessing && <label className="mt-2 flex items-center gap-2 text-xs font-medium text-foreground">Leads/minute
                       <input aria-label="Leads per minute for this push" type="number" min={1} max={100} step={1} className="w-20 rounded-md border bg-background px-2 py-1 text-sm"
@@ -2268,13 +2263,13 @@ export function UploadLeadsTab({
                       setScheduleDate(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`);
                       setScheduleTime(`${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`);
                       setShowScheduleModal(true);
-                    }} disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || hasValidationErrors || isAllProcessed}
+                    }} disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || leads.length === 0 || isAllProcessed}
                       className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg border px-4 font-medium disabled:opacity-50 sm:flex-none">
                       <CalendarClock className="h-4 w-4" /> Schedule
                     </button>
                     <button
                       onClick={processLeads}
-                      disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || isAllProcessed}
+                      disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || leads.length === 0 || isAllProcessed}
                       className="btn-success flex min-h-12 flex-1 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                     >
                       <Rocket className="h-5 w-5" />
@@ -2443,7 +2438,7 @@ export function UploadLeadsTab({
                 {!isProcessing ? (
                   <button
                     onClick={processLeads}
-                    disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0 || processedDisplayCount === leads.length}
+                    disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || leads.length === 0 || processedDisplayCount === leads.length}
                     className="btn-success flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Rocket className="h-5 w-5" />
@@ -2483,7 +2478,7 @@ export function UploadLeadsTab({
                   {hasValidationErrors && (
                     <p className="text-xs text-warning flex items-center gap-1 mt-1">
                       <AlertTriangle className="h-3 w-3" />
-                      {validationErrors.size} lead(s) have errors - click edit to fix
+                      {validationErrors.size} row(s) have warnings. Process sends every row; the university may reject invalid data.
                     </p>
                   )}
                   {dbDuplicates.size > 0 && (
@@ -2494,6 +2489,12 @@ export function UploadLeadsTab({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {hasValidationErrors && (
+                    <button type="button" onClick={() => setShowOnlyInvalid((value) => !value)}
+                      className="rounded-md border border-warning/50 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/10">
+                      {showOnlyInvalid ? 'Show all rows' : `Show ${validationErrors.size} rows with errors`}
+                    </button>
+                  )}
                   {failedCount > 0 && !isProcessing && (
                     <button
                       onClick={exportFailedLeads}
@@ -2564,7 +2565,10 @@ export function UploadLeadsTab({
               )}
 
               <LeadPreviewTable
-                leads={leads.slice(0, pageSize)}
+                leads={showOnlyInvalid && hasValidationErrors
+                  ? [...validationErrors.keys()].map((index) => leads[index]).filter(Boolean)
+                  : leads.slice(0, pageSize)}
+                rowIndices={showOnlyInvalid && hasValidationErrors ? [...validationErrors.keys()] : undefined}
                 showStatus={isProcessing || processedDisplayCount > 0 || leadResponses.size > 0 || leadStatuses.size > 0}
                 leadStatuses={leadStatuses}
                 leadResponses={leadResponses}
@@ -2572,9 +2576,12 @@ export function UploadLeadsTab({
                 csvColumnMapping={tempColumnMapping}
                 validationErrors={validationErrors}
                 dbDuplicates={dbDuplicates}
-                onUpdateLead={isAdmin && !isProcessing ? handleUpdateLead : undefined}
-                isEditable={isAdmin && !isProcessing && processedDisplayCount === 0}
+                onUpdateLead={!isProcessing ? handleUpdateLead : undefined}
+                isEditable={!isProcessing && processedDisplayCount === 0}
                 maskContacts={!isAdmin}
+                requiredFields={(selectedUniversity?.customColumns || [])
+                  .filter((column) => column.isRequired && !['name', 'email', 'mobile', 'state', 'city', 'course'].includes(column.columnKey))
+                  .map((column) => ({ key: column.columnKey, label: column.columnName }))}
                 rowOffset={0}
               />
 
@@ -2588,7 +2595,7 @@ export function UploadLeadsTab({
                   </div>
                   <button
                     onClick={processLeads}
-                    disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || hasValidationErrors || leads.length === 0}
+                    disabled={Boolean(batchId) || !selectedUniversity?.detailsLoaded || leads.length === 0}
                     className="btn-success flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Rocket className="h-5 w-5" />
@@ -2599,9 +2606,11 @@ export function UploadLeadsTab({
 
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Showing {Math.min(pageSize, leads.length)} of {leads.length} records
+                  {showOnlyInvalid && hasValidationErrors
+                    ? `Showing ${validationErrors.size} rows with warnings from ${leads.length} records`
+                    : `Showing ${Math.min(pageSize, leads.length)} of ${leads.length} records`}
                 </p>
-                <div className="flex items-center gap-2">
+                {!showOnlyInvalid && <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Show:</span>
                   {[10, 20, 50, 100].map((size) => (
                     <button
@@ -2634,7 +2643,7 @@ export function UploadLeadsTab({
                       Go
                     </button>
                   </div>
-                </div>
+                </div>}
               </div>
             </div>
           )}
@@ -2703,7 +2712,7 @@ export function UploadLeadsTab({
                     <button
                       onClick={processLeads}
                       className="btn-success w-full flex items-center justify-center gap-2"
-                      disabled={Boolean(batchId) || hasValidationErrors || processedDisplayCount > 0 || !selectedUniversity?.detailsLoaded}
+                      disabled={Boolean(batchId) || processedDisplayCount > 0 || !selectedUniversity?.detailsLoaded}
                     >
                       <Rocket className="h-5 w-5" />
                       Process Now
@@ -2711,12 +2720,12 @@ export function UploadLeadsTab({
                     {processedDisplayCount === 0 && (
                       <>
                         <button
-                          onClick={() => startBackgroundProcessing()}
-                          disabled={Boolean(batchId)}
+                          onClick={processLeads}
+                          disabled={Boolean(batchId) || processedDisplayCount > 0 || !selectedUniversity?.detailsLoaded}
                           className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium border border-primary text-primary hover:bg-primary/10"
                         >
                           <Clock className="h-5 w-5" />
-                          Queue for Background Processing
+                          Process on server now
                         </button>
                         <button
                           onClick={() => {

@@ -31,7 +31,9 @@ interface LeadPreviewTableProps {
   onUpdateLead?: (index: number, lead: Lead) => void;
   isEditable?: boolean;
   rowOffset?: number;
+  rowIndices?: number[];
   maskContacts?: boolean;
+  requiredFields?: Array<{ key: string; label: string }>;
 }
 
 export function LeadPreviewTable({
@@ -47,11 +49,14 @@ export function LeadPreviewTable({
   onUpdateLead,
   isEditable = false,
   rowOffset = 0,
+  rowIndices,
   maskContacts = false,
+  requiredFields = [],
 }: LeadPreviewTableProps) {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editData, setEditData] = useState<Lead | null>(null);
+  const [contactEdits, setContactEdits] = useState<Record<string, string>>({});
 
   // Deep-normalize every lead value to a string - prevents React from ever seeing an object child.
   // Use JSON.stringify as fingerprint so ANY nested value change triggers recalculation.
@@ -171,14 +176,15 @@ export function LeadPreviewTable({
     );
   };
 
-  const startEditing = (index: number) => {
-    setEditingRow(index);
+  const startEditing = (actualIndex: number, lead: Lead) => {
+    setEditingRow(actualIndex);
+    setContactEdits({});
     // The preview is tolerant of historical/object-valued leads. The edit
     // controls must be equally strict: an input value may not receive an
     // object such as `{ contact_name: "..." }`.
     setEditData(
       Object.fromEntries(
-        Object.entries(leads[index] || {}).map(([key, value]) => [key, safeStringify(value)]),
+        Object.entries(lead || {}).map(([key, value]) => [key, safeStringify(value)]),
       ) as Lead,
     );
   };
@@ -186,13 +192,15 @@ export function LeadPreviewTable({
   const cancelEditing = () => {
     setEditingRow(null);
     setEditData(null);
+    setContactEdits({});
   };
 
   const saveEditing = () => {
     if (editingRow !== null && editData && onUpdateLead) {
-      onUpdateLead(editingRow, editData);
+      onUpdateLead(editingRow, { ...editData, ...contactEdits });
       setEditingRow(null);
       setEditData(null);
+      setContactEdits({});
     }
   };
 
@@ -268,7 +276,7 @@ export function LeadPreviewTable({
         </thead>
         <tbody className="divide-y divide-border">
           {safeLeads.map((lead, index) => {
-            const actualIndex = rowOffset + index;
+            const actualIndex = rowIndices?.[index] ?? rowOffset + index;
             const errors = validationErrors.get(actualIndex);
             const hasErrors = errors && errors.length > 0;
             const isDbDuplicate = dbDuplicates.has(actualIndex);
@@ -292,16 +300,18 @@ export function LeadPreviewTable({
                       <td className="px-2 py-1">
                         <input
                           type="email"
-                          value={editData.email}
-                          onChange={(e) => updateField("email", e.target.value)}
+                          value={maskContacts ? contactEdits.email || "" : editData.email}
+                          onChange={(e) => maskContacts ? setContactEdits((previous) => ({ ...previous, email: e.target.value })) : updateField("email", e.target.value)}
+                          placeholder={maskContacts ? `Replace ${maskEmail(editData.email || "email")}` : undefined}
                           className="w-full px-2 py-1 text-sm border border-border rounded bg-background"
                         />
                       </td>
                       <td className="px-2 py-1">
                         <input
                           type="tel"
-                          value={editData.mobile}
-                          onChange={(e) => updateField("mobile", e.target.value)}
+                          value={maskContacts ? contactEdits.mobile || "" : editData.mobile}
+                          onChange={(e) => maskContacts ? setContactEdits((previous) => ({ ...previous, mobile: e.target.value })) : updateField("mobile", e.target.value)}
+                          placeholder={maskContacts ? `Replace ${maskMobile(editData.mobile || "") || 'mobile'}` : undefined}
                           className="w-full px-2 py-1 text-sm border border-border rounded bg-background font-mono"
                         />
                       </td>
@@ -335,6 +345,7 @@ export function LeadPreviewTable({
                   ) : (
                     <>
                       <td className="px-3 py-2 text-foreground font-medium">
+                        <span className="mr-2 text-[10px] font-normal text-muted-foreground">#{actualIndex + 1}</span>
                         {renderCellValue(lead.name, "Missing") === "Missing" ? (
                           <span className="text-destructive italic">Missing</span>
                         ) : (
@@ -439,7 +450,7 @@ export function LeadPreviewTable({
                         <div className="flex items-center justify-center gap-1">
                           {isEditable && onUpdateLead && (
                             <button
-                              onClick={() => startEditing(actualIndex)}
+                              onClick={() => startEditing(actualIndex, leads[index])}
                               className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded"
                               title="Edit lead"
                             >
@@ -460,6 +471,27 @@ export function LeadPreviewTable({
                     </td>
                   )}
                 </tr>
+
+                {isEditing && editData && requiredFields.length > 0 && (
+                  <tr className="bg-muted/20">
+                    <td colSpan={colSpan} className="px-3 py-3">
+                      <p className="mb-2 text-xs font-medium text-foreground">Required university fields</p>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {requiredFields.map(({ key, label }) => {
+                          const contactField = maskContacts && /(?:email|mobile|phone|telephone|whatsapp)/i.test(key);
+                          return <label key={key} className="text-xs text-muted-foreground">{label}
+                            <input className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+                              value={contactField ? contactEdits[key] || "" : editData[key] || ""}
+                              placeholder={contactField ? 'Enter replacement' : `Enter ${label}`}
+                              onChange={(event) => contactField
+                                ? setContactEdits((previous) => ({ ...previous, [key]: event.target.value }))
+                                : updateField(key, event.target.value)} />
+                          </label>;
+                        })}
+                      </div>
+                    </td>
+                  </tr>
+                )}
 
                 {/* Expanded row for validation errors */}
                 {hasErrors && expandedRow === actualIndex && (
