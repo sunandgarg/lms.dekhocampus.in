@@ -2067,9 +2067,12 @@ export function UploadLeadsTab({
     catch (error) { setAlert({ type: "error", message: String(error) }); return; }
     pausedRef.current = false;
     setIsPaused(false);
+    setBatchStatus('processing');
+    setIsProcessing(true);
+    setIsBackgroundPolling(true);
     setSafetyPauseReason("");
     setDiscussionWith("");
-    setAlert(null);
+    setAlert({ type: 'success', message: 'Batch resumed on the server. Already processed leads will not be sent again.' });
   };
 
   const stopProcessing = async () => {
@@ -2175,7 +2178,7 @@ export function UploadLeadsTab({
           <Alert type={alert.type} message={isAdmin ? alert.message : maskContactText(alert.message)} onClose={() => setAlert(null)} />
         </div>
       )}
-      {safetyPauseReason && isProcessing && (
+      {safetyPauseReason && batchId && isPaused && (
         <div role="alert" className="rounded-xl border-2 border-amber-500 bg-amber-50 p-4 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
           <p className="font-bold">25 leads failed consecutively. This batch is paused.</p>
           <p className="mt-1 text-sm">{safetyPauseReason} Review the response CSV, then record who you discussed it with before continuing.</p>
@@ -2187,7 +2190,8 @@ export function UploadLeadsTab({
         </div>
       )}
       {batchId && <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-        <span>{batchStatus === 'scheduled' ? 'Scheduled on the server. You can close your browser; delivery starts at the selected time.' : 'Processing runs on the server after the full queue is saved. You can close your browser once queuing is complete.'}</span>
+        <span>{isPaused ? 'This batch is paused on the server. Resume the remaining queued leads when ready.' : batchStatus === 'scheduled' ? 'Scheduled on the server. You can close your browser; delivery starts at the selected time.' : 'Processing runs on the server after the full queue is saved. You can close your browser once queuing is complete.'}</span>
+        {isPaused && !safetyPauseReason && <button type="button" className="btn-success min-h-10 px-4" onClick={resumeProcessing}><Play className="mr-2 inline h-4 w-4" />Unblock & resume batch</button>}
         <a className="font-semibold text-primary underline" href={`/api/batches/${batchId}/response.csv`}>Download response CSV</a>
       </div>}
 
@@ -2202,7 +2206,9 @@ export function UploadLeadsTab({
               <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-foreground">
-                    {!hasLoadedLeads
+                    {!hasLoadedLeads && batchId && isProcessing
+                      ? `Server processing: ${batchCounts.processed} / ${batchCounts.total || '…'}`
+                      : !hasLoadedLeads
                       ? selectedUniversity
                         ? currentFileName || fileName
                           ? `CSV selected: ${currentFileName || fileName}`
@@ -2217,6 +2223,8 @@ export function UploadLeadsTab({
                   <p className="text-xs text-muted-foreground">
                     {hasValidationErrors
                       ? `${validationErrors.size} rows have warnings. Process sends every row; edit warnings first if needed.`
+                      : batchId && isProcessing
+                        ? 'This batch is running on the server. The queue monitor shows its progress.'
                       : hasLoadedLeads
                         ? "Action buttons stay visible here while you review the preview."
                         : selectedUniversity
@@ -2247,7 +2255,17 @@ export function UploadLeadsTab({
                   </div>
                 )}
 
-                {!hasLoadedLeads ? (
+                {batchId && isPaused ? (
+                  <button type="button" onClick={resumeProcessing} disabled={Boolean(safetyPauseReason) && !discussionWith.trim()}
+                    className="btn-success flex min-h-12 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
+                    <Play className="h-5 w-5" /> Unblock & resume batch
+                  </button>
+                ) : batchId && isProcessing && !hasLoadedLeads ? (
+                  <div className="flex w-full gap-2 sm:w-auto">
+                    <button type="button" onClick={pauseProcessing} className="btn-primary flex min-h-12 flex-1 items-center justify-center gap-2 sm:flex-none"><Pause className="h-5 w-5" /> Pause</button>
+                    <button type="button" onClick={stopProcessing} className="flex min-h-12 flex-1 items-center justify-center rounded-lg bg-destructive px-5 font-medium text-destructive-foreground sm:flex-none">Stop</button>
+                  </div>
+                ) : !hasLoadedLeads ? (
                   <button
                     onClick={openCsvPicker}
                     disabled={!selectedUniversity?.detailsLoaded || (isProcessing && !isPaused)}
