@@ -15,6 +15,7 @@ import { processQueue, serverIp, verifyDomain } from './misc-functions.mjs';
 import { canUpload, isAdmin, requireOwnedBatch, userRecords } from './access.mjs';
 import { hideLeads } from './lead-visibility.mjs';
 import { batchReport } from './report.mjs';
+import { maskContactData } from './mask-contact.mjs';
 import { testApi, testCustomIntegration } from './test-integrations.mjs';
 import { exportData, importData } from './db-transfer.mjs';
 import { aiGateway } from './ai.mjs';
@@ -228,8 +229,9 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
             universities: batch.universities })));
         }
         const byId = new Map(batches.map((batch) => [batch.id, batch]));
-        return send(response, 200, { deliveries: Object.fromEntries(leads.map((lead) => [lead.id,
-          (lead.batch_ids || []).map((id) => byId.get(id)).filter(Boolean)])) });
+        const deliveries = Object.fromEntries(leads.map((lead) => [lead.id,
+          (lead.batch_ids || []).map((id) => byId.get(id)).filter(Boolean)]));
+        return send(response, 200, { deliveries: isAdmin(user) ? deliveries : maskContactData(deliveries) });
       }
       if (url.pathname === '/api/functions/delete-leads' && method === 'POST') {
         requireAdmin(user);
@@ -352,7 +354,7 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
         const result = Array.isArray(body.tasks)
           ? await processLeadBatch({ db, s3, bucket, tasks: body.tasks, concurrency: body.concurrency, userId: user.id })
           : await processLead({ db, s3, bucket, task: body, userId: user.id });
-        return send(response, 200, result);
+        return send(response, 200, isAdmin(user) ? result : maskContactData(result));
       }
 
       const source = /^\/api\/batches\/([^/]+)\/source$/.exec(url.pathname);
@@ -391,14 +393,15 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
         checkBatchId(responseCsv[1]);
         await requireOwnedBatch(db, user, responseCsv[1]);
         response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="lead-responses-${responseCsv[1]}.csv"`,
+          'Content-Disposition': `attachment; filename="lead-responses-${isAdmin(user) ? 'full' : 'masked'}-${responseCsv[1]}.csv"`,
           'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-        for await (const row of batchReport(db, responseCsv[1])) response.write(row);
+        for await (const row of batchReport(db, responseCsv[1], { masked: !isAdmin(user) })) response.write(row);
         return response.end();
       }
 
       const archive = /^\/api\/batches\/([^/]+)\/archive\.zip$/.exec(url.pathname);
       if (archive && method === 'GET') {
+        requireAdmin(user);
         checkBatchId(archive[1]);
         await requireOwnedBatch(db, user, archive[1]);
         if (!bucket) throw new Error('Archive bucket is not configured');
@@ -443,21 +446,22 @@ export async function start() {
   server.listen(Number(process.env.PORT || 3000), '127.0.0.1');
   const retryTimer = setInterval(() => runAutoRetries({ db, s3, bucket: process.env.ARCHIVE_BUCKET })
     .catch((error) => console.error('Automatic retry scan failed:', error)), 60_000);
-  let queueBusy = false;
+  let activeQueueWorkers = 0;
   let lastScheduleScan = 0;
-  const queueTimer = setInterval(async () => {
-    if (queueBusy) return;
-    queueBusy = true;
-    try {
-      if (Date.now() - lastScheduleScan >= 5000) {
-        lastScheduleScan = Date.now();
-        await activateScheduledBatches(db);
-      }
-      await workQueue({ db, s3, bucket: process.env.ARCHIVE_BUCKET });
+  let scheduleScanBusy = false;
+  const queueTimer = setInterval(() => {
+    if (!scheduleScanBusy && Date.now() - lastScheduleScan >= 5000) {
+      lastScheduleScan = Date.now();
+      scheduleScanBusy = true;
+      activateScheduledBatches(db).catch((error) => console.error('Schedule scan failed:', error))
+        .finally(() => { scheduleScanBusy = false; });
     }
-    catch (error) { console.error('Lead queue worker failed:', error); }
-    finally { queueBusy = false; }
-  }, 500);
+    if (activeQueueWorkers >= 2) return;
+    activeQueueWorkers++;
+    workQueue({ db, s3, bucket: process.env.ARCHIVE_BUCKET })
+      .catch((error) => console.error('Lead queue worker failed:', error))
+      .finally(() => { activeQueueWorkers--; });
+  }, 100);
   server.on('close', () => { clearInterval(retryTimer); clearInterval(queueTimer); db.end(); });
   return server;
 }

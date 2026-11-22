@@ -3,6 +3,7 @@ import { Search, Calendar, FileText, CheckCircle2, XCircle, Clock, RefreshCw, Fi
 import { api } from "@/integrations/api/client";
 import { format } from "date-fns";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
 
 interface UploadBatch {
   id: string;
@@ -41,6 +42,7 @@ interface BatchLeadSummary {
 const PAGE_SIZE = 100;
 
 export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
+  const { isAdmin } = useAdminAuth();
   const [batches, setBatches] = useState<UploadBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedUniversity, setSelectedUniversity] = useState("");
@@ -335,10 +337,10 @@ export function UploadHistoryTab({ universities }: UploadHistoryTabProps) {
                             <BarChart3 className="h-3.5 w-3.5" />
                             {expandedBatch === batch.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                           </button>
-                          <a href={`/api/batches/${batch.id}/archive.zip`} title={batch.historical_import_without_source ? "Historical summary only; original CSV and lead files were absent from the backup" : "Download source and transaction ZIP"} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                          {isAdmin && <a href={`/api/batches/${batch.id}/archive.zip`} title={batch.historical_import_without_source ? "Historical summary only; original CSV and lead files were absent from the backup" : "Download source and transaction ZIP"} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
                             <Download className="h-3.5 w-3.5" /> {batch.historical_import_without_source ? 'ZIP (summary only)' : 'ZIP'}
-                          </a>
-                          <a href={`/api/batches/${batch.id}/response.csv`} title="Download response CSV with result and color columns" className="inline-flex items-center gap-1 text-xs text-primary hover:underline"><Download className="h-3.5 w-3.5" /> Response CSV</a>
+                          </a>}
+                          <a href={`/api/batches/${batch.id}/response.csv`} title={isAdmin ? "Download full response CSV" : "Download masked response CSV"} className="inline-flex items-center gap-1 text-xs text-primary hover:underline"><Download className="h-3.5 w-3.5" /> {isAdmin ? 'Response CSV' : 'Masked CSV'}</a>
                         </div>
                       </td>
                     </tr>

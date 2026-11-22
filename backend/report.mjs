@@ -1,10 +1,12 @@
+import { maskContactData } from './mask-contact.mjs';
+
 function csv(value) {
   const string = String(value ?? '');
   const safe = /^[=+\-@\t\r]/.test(string) ? `'${string}` : string;
   return `"${safe.replaceAll('"', '""')}"`;
 }
 
-export async function* batchReport(db, batchId) {
+export async function* batchReport(db, batchId, { masked = false } = {}) {
   const extraKeys = new Set();
   const readPage = async (offset) => {
     const [rows] = await db.execute(
@@ -23,7 +25,8 @@ export async function* batchReport(db, batchId) {
   const standard = ['lead_id', 'name', 'email', 'mobile', 'address', 'city', 'state', 'course',
     'specialization', 'lead_source', 'lead_medium', 'lead_campaign', 'university_id'];
   const extras = [...extraKeys].sort();
-  yield [...standard, ...extras, 'delivery_status', 'status_color', 'processed_at', 'partner_response'].map(csv).join(',') + '\r\n';
+  const fields = [...standard, ...extras, 'delivery_status', 'status_color', 'processed_at', 'partner_response'];
+  yield fields.map(csv).join(',') + '\r\n';
   offset = 0;
   while (true) {
     const rows = await readPage(offset);
@@ -34,7 +37,7 @@ export async function* batchReport(db, batchId) {
         lead.course, lead.specialization, lead.lead_source, lead.lead_medium, lead.lead_campaign,
         lead.university_id, ...extras.map((key) => lead.extra_data?.[key]), status, color,
         lead.processed_at, lead.api_response];
-      yield values.map(csv).join(',') + '\r\n';
+      yield values.map((value, index) => csv(masked ? maskContactData(value, fields[index]) : value)).join(',') + '\r\n';
     }
     if (rows.length < 500) return;
     offset += rows.length;

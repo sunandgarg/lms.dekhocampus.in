@@ -1,5 +1,6 @@
 import { executeRecords } from './records.mjs';
 import { redactPartnerMapping, sensitivePartnerField } from './inbound-field-overrides.mjs';
+import { maskContactData } from './mask-contact.mjs';
 
 const CONFIG_READ = new Set([
   'universities', 'programs', 'state_cities', 'course_specializations',
@@ -62,7 +63,7 @@ function hideLeadSecrets(result) {
   const strip = (row) => row?.extra_data && typeof row.extra_data === 'object'
     ? { ...row, extra_data: Object.fromEntries(Object.entries(row.extra_data)
       .filter(([key]) => !/(?:api.?key|access.?key|secret|token|password|authorization|(?:^|[_-])key(?:$|[_-]))/i.test(key))) } : row;
-  return { ...result, data: Array.isArray(result.data) ? result.data.map(strip) : strip(result.data) };
+  return { ...result, data: maskContactData(Array.isArray(result.data) ? result.data.map(strip) : strip(result.data)) };
 }
 
 export async function userRecords(db, user, input) {
@@ -106,7 +107,9 @@ export async function userRecords(db, user, input) {
     const owner = OWN_READ.get(query.table);
     if (!owner) forbidden();
     query.filters.push({ field: owner, op: 'eq', value: user.id });
-    return executeRecords(db, query);
+    const result = await executeRecords(db, query);
+    return ['upload_batches', 'api_logs'].includes(query.table)
+      ? { ...result, data: maskContactData(result.data) } : result;
   }
   if (!await canUpload(db, user)) forbidden();
   if (query.table !== 'upload_batches') forbidden();

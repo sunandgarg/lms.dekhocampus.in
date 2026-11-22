@@ -54,6 +54,9 @@ export async function claimNext(db) {
       WHERE q.status = 'queued' AND JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.status')) = 'processing'
       AND JSON_EXTRACT(b.data, '$.is_paused') != true AND JSON_EXTRACT(b.data, '$.is_cancelled') != true
       AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.next_send_at_ms')) AS UNSIGNED), 0) <= ?
+      AND (SELECT COUNT(*) FROM lms_lead_queue in_flight
+        WHERE in_flight.batch_id = q.batch_id AND in_flight.status = 'processing') <
+        CASE WHEN COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.consecutive_fail_count')) AS UNSIGNED), 0) >= 24 THEN 1 ELSE 2 END
       ORDER BY q.created_at, q.lead_index LIMIT 1 FOR UPDATE SKIP LOCKED`, [Date.now()]);
     if (!rows.length) { await connection.rollback(); return null; }
     const item = rows[0];

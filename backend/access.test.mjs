@@ -31,9 +31,22 @@ test('team users cannot read partner credentials', async () => {
 });
 
 test('team users see incoming lead data without stored credential fields', async () => {
-  const db = { execute: async () => [[{ data: { id: 'x', extra_data: { city: 'Noida', access_token: 'private' } } }]] };
+  const db = { execute: async () => [[{ data: { id: 'x', name: 'Sunand Garg', email: 'sunandgarg@gmail.com', mobile: '8700602524',
+    extra_data: { city: 'Noida', original_mobile: '+91 8700602524', access_token: 'private' } } }]] };
   const result = await userRecords(db, user, { table: 'inbound_leads', select: '*' });
-  assert.deepEqual(result.data[0].extra_data, { city: 'Noida' });
+  assert.equal(result.data[0].name, 'Sunand Garg');
+  assert.equal(result.data[0].email, 's******g@gmail.com');
+  assert.equal(result.data[0].mobile, '8***4');
+  assert.deepEqual(result.data[0].extra_data, { city: 'Noida', original_mobile: '8***4' });
+});
+
+test('team users cannot read full contacts in their API logs', async () => {
+  const db = { execute: async () => [[{ data: { email: 'sunandgarg@gmail.com', user_id: user.id,
+    lead_data: { mobile: '8700602524' }, response: 'Saved 8700602524' } }]] };
+  const { data } = await userRecords(db, user, { table: 'api_logs', select: '*' });
+  assert.equal(data[0].email, 's******g@gmail.com');
+  assert.equal(data[0].lead_data.mobile, '8***4');
+  assert.equal(data[0].response, 'Saved 8***4');
 });
 
 test('team users cannot edit university configuration', async () => {

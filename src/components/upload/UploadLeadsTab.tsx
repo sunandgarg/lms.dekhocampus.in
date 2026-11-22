@@ -29,6 +29,8 @@ import { SingleLeadForm } from "./SingleLeadForm";
 import { Alert } from "../Alert";
 import { api } from "@/integrations/api/client";
 import { useUploadStatePersistence } from "@/hooks/useUploadStatePersistence";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { maskContactText } from "@/utils/contactMask";
 import { isMappedCanonicalDuplicate } from "@/lib/lead/canonicalPayload";
 import { normalizeAmityExternalPartnerPayload } from "@/lib/lead/amityExternalPartner";
 
@@ -471,6 +473,7 @@ export function UploadLeadsTab({
 }: UploadLeadsTabProps) {
   const safeUniversities = useMemo(() => universities.map(normalizeUniversityRecord), [universities]);
   const persistence = useUploadStatePersistence();
+  const { isAdmin } = useAdminAuth();
   const { state: persistedState, processing: persistedProcessing } = persistence;
 
   const [selectedUniversity, setSelectedUniversityState] = useState<University | null>(() => {
@@ -1803,7 +1806,8 @@ export function UploadLeadsTab({
     const failedLeads = leads.filter((_, index) => leadStatuses.get(index) === "failed");
     if (failedLeads.length === 0) return;
 
-    const csvContent = generateLeadsCSV(failedLeads);
+    const rawCsv = generateLeadsCSV(failedLeads);
+    const csvContent = isAdmin ? rawCsv : maskContactText(rawCsv);
     const blob = new Blob([csvContent], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -2173,7 +2177,7 @@ export function UploadLeadsTab({
     <div className={`space-y-6 ${showUploadActionBar ? "pb-80 sm:pb-48" : ""}`}>
       {alert && (
         <div className="mb-6">
-          <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
+          <Alert type={alert.type} message={isAdmin ? alert.message : maskContactText(alert.message)} onClose={() => setAlert(null)} />
         </div>
       )}
       {safetyPauseReason && isProcessing && (
@@ -2198,7 +2202,7 @@ export function UploadLeadsTab({
           <>
             <div className="fixed inset-x-0 bottom-0 z-40 max-h-[55vh] overflow-y-auto border-t border-border bg-card px-4 py-3 shadow-2xl">
               {alert && <p role="alert" className={`mx-auto mb-3 max-w-6xl rounded-md border px-3 py-2 text-sm ${alert.type === 'error' ? 'border-destructive/40 bg-destructive/10 text-destructive' : 'border-amber-300 bg-amber-50 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100'}`}>
-                {alert.message}
+                {isAdmin ? alert.message : maskContactText(alert.message)}
               </p>}
               <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
@@ -2554,7 +2558,7 @@ export function UploadLeadsTab({
                     <p className="text-xs text-muted-foreground">First row preview</p>
                   </div>
                   <pre className="max-h-80 overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs text-foreground whitespace-pre-wrap">
-                    {leadPayloads.get(0)}
+                    {isAdmin ? leadPayloads.get(0) : maskContactText(leadPayloads.get(0) || '')}
                   </pre>
                 </div>
               )}
@@ -2568,8 +2572,9 @@ export function UploadLeadsTab({
                 csvColumnMapping={tempColumnMapping}
                 validationErrors={validationErrors}
                 dbDuplicates={dbDuplicates}
-                onUpdateLead={!isProcessing ? handleUpdateLead : undefined}
-                isEditable={!isProcessing && processedDisplayCount === 0}
+                onUpdateLead={isAdmin && !isProcessing ? handleUpdateLead : undefined}
+                isEditable={isAdmin && !isProcessing && processedDisplayCount === 0}
+                maskContacts={!isAdmin}
                 rowOffset={0}
               />
 
@@ -2646,7 +2651,7 @@ export function UploadLeadsTab({
               <h3 className="font-medium text-foreground mb-4">Processing Status</h3>
               {selectedUniversity && <p className="mb-2 break-all text-sm text-muted-foreground">Destination: <span className="font-medium text-foreground">{selectedUniversity.name}</span>{selectedUniversity.api_url && <> · {selectedUniversity.api_url}</>}</p>}
               {batchId && <p className="mb-4 text-sm text-muted-foreground">Server status: <span className="font-medium capitalize text-foreground">{batchStatus || 'checking'}</span></p>}
-              {partnerMessage && <p role="status" className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">Partner response: {partnerMessage}</p>}
+              {partnerMessage && <p role="status" className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">Partner response: {isAdmin ? partnerMessage : maskContactText(partnerMessage)}</p>}
               {!isProcessing && leads.length > 0 && <label className="mb-4 block rounded-lg border bg-muted/20 p-3 text-sm font-medium text-foreground">
                 Leads per minute for this run
                 <input type="number" min={1} max={100} step={1} className="input-field mt-2 w-28" value={batchRate}

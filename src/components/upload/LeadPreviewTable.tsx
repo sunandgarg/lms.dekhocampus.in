@@ -1,6 +1,7 @@
 import { RotateCcw, CheckCircle2, XCircle, Clock, Eye, AlertTriangle, Pencil, Check, X } from "lucide-react";
 import { useState, Fragment, useMemo } from "react";
 import { type Lead } from "@/utils/leadValidation";
+import { maskContactData, maskContactText, maskEmail, maskMobile } from "@/utils/contactMask";
 
 // Module-level helper: recursively flatten any value to a string for safe React rendering
 const safeStringify = (val: unknown): string => {
@@ -30,6 +31,7 @@ interface LeadPreviewTableProps {
   onUpdateLead?: (index: number, lead: Lead) => void;
   isEditable?: boolean;
   rowOffset?: number;
+  maskContacts?: boolean;
 }
 
 export function LeadPreviewTable({
@@ -45,6 +47,7 @@ export function LeadPreviewTable({
   onUpdateLead,
   isEditable = false,
   rowOffset = 0,
+  maskContacts = false,
 }: LeadPreviewTableProps) {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [editingRow, setEditingRow] = useState<number | null>(null);
@@ -121,9 +124,9 @@ export function LeadPreviewTable({
     const safeResponse = safeStringify(response);
     try {
       const parsed = JSON.parse(safeResponse);
-      return JSON.stringify(parsed, null, 2);
+      return JSON.stringify(maskContacts ? maskContactData(parsed) : parsed, null, 2);
     } catch {
-      return safeResponse;
+      return maskContacts ? maskContactText(safeResponse) : safeResponse;
     }
   };
 
@@ -131,29 +134,28 @@ export function LeadPreviewTable({
     const safeResponse = safeStringify(response);
     try {
       const parsed = JSON.parse(safeResponse);
-      if (parsed.message) return parsed.message;
-      if (parsed.error) return parsed.error;
-      if (parsed.status) return parsed.status;
+      if (parsed.message) return maskContacts ? maskContactText(String(parsed.message)) : parsed.message;
+      if (parsed.error) return maskContacts ? maskContactText(String(parsed.error)) : parsed.error;
+      if (parsed.status) return maskContacts ? maskContactText(String(parsed.status)) : parsed.status;
       return "View response";
     } catch {
-      return safeResponse.substring(0, 30) + (safeResponse.length > 30 ? "..." : "");
+      const display = maskContacts ? maskContactText(safeResponse) : safeResponse;
+      return display.substring(0, 30) + (display.length > 30 ? "..." : "");
     }
   };
 
-  const renderPayloadDetails = (lead: Lead, index: number) => (
+  const renderPayloadDetails = (lead: Lead, index: number) => {
+    const mapped = Object.keys(csvColumnMapping).length
+      ? Object.fromEntries(Object.entries(csvColumnMapping)
+          .filter(([, target]) => target)
+          .map(([header, target]) => [header, lead[target] ?? ""]))
+      : lead;
+    return (
     <div className="space-y-3">
       <div>
         <p className="font-medium text-foreground mb-1 text-xs">Mapped CSV columns (including blank values)</p>
         <pre className="bg-background p-3 rounded-lg overflow-x-auto font-mono text-xs text-foreground whitespace-pre-wrap">
-          {JSON.stringify(
-            Object.keys(csvColumnMapping).length
-              ? Object.fromEntries(Object.entries(csvColumnMapping)
-                  .filter(([, target]) => target)
-                  .map(([header, target]) => [header, lead[target] ?? ""]))
-              : lead,
-            null,
-            2,
-          )}
+          {JSON.stringify(maskContacts ? maskContactData(mapped) : mapped, null, 2)}
         </pre>
       </div>
       <div>
@@ -166,7 +168,8 @@ export function LeadPreviewTable({
         </p>
       </div>
     </div>
-  );
+    );
+  };
 
   const startEditing = (index: number) => {
     setEditingRow(index);
@@ -342,14 +345,14 @@ export function LeadPreviewTable({
                         {renderCellValue(lead.email, "Missing") === "Missing" ? (
                           <span className="text-destructive italic">Missing</span>
                         ) : (
-                          renderCellValue(lead.email)
+                          maskContacts ? maskEmail(renderCellValue(lead.email)) : renderCellValue(lead.email)
                         )}
                       </td>
                       <td className="px-3 py-2 text-foreground font-mono text-xs">
                         {renderCellValue(lead.mobile, "Missing") === "Missing" ? (
                           <span className="text-destructive italic">Missing</span>
                         ) : (
-                          renderCellValue(lead.mobile)
+                          maskContacts ? maskMobile(renderCellValue(lead.mobile)) : renderCellValue(lead.mobile)
                         )}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
@@ -468,7 +471,7 @@ export function LeadPreviewTable({
                       </p>
                       <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
                         {errors.map((error, i) => (
-                          <li key={i}>{error}</li>
+                          <li key={i}>{maskContacts ? maskContactText(error) : error}</li>
                         ))}
                       </ul>
 
