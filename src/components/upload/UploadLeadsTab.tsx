@@ -1562,6 +1562,14 @@ export function UploadLeadsTab({
     };
   };
 
+  const openCsvPicker = () => {
+    if (!selectedUniversity?.detailsLoaded || (isProcessing && !isPaused)) return;
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  };
+
   // ✅ FIX 4: Accept mappingOverride so the "Apply" button passes localColumnMapping directly
   const applyColumnMappingAndProcess = useCallback(
     (mappingOverride?: Record<string, string>) => {
@@ -1681,6 +1689,9 @@ export function UploadLeadsTab({
 
       setLeads(mappedLeads);
       setBatchId(null);
+      setIsProcessing(false);
+      setIsPaused(false);
+      setIsBackgroundPolling(false);
       setBatchStatus('');
       setBatchCounts({ success: 0, failed: 0, duplicates: 0, processed: 0, total: 0 });
       setPartnerMessage('');
@@ -2239,8 +2250,8 @@ export function UploadLeadsTab({
 
                 {!hasLoadedLeads ? (
                   <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={!selectedUniversity?.detailsLoaded}
+                    onClick={openCsvPicker}
+                    disabled={!selectedUniversity?.detailsLoaded || (isProcessing && !isPaused)}
                     className="btn-primary flex min-h-12 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                   >
                     <Upload className="h-5 w-5" />
@@ -2373,9 +2384,11 @@ export function UploadLeadsTab({
                   Add Single Lead
                 </button>
               </div>
-              <div
-                className={`upload-zone ${isProcessing || !selectedUniversity.detailsLoaded ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                onClick={() => !isProcessing && selectedUniversity.detailsLoaded && fileInputRef.current?.click()}
+              <button
+                type="button"
+                className={`upload-zone w-full ${(isProcessing && !isPaused) || !selectedUniversity.detailsLoaded ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                onClick={openCsvPicker}
+                disabled={(isProcessing && !isPaused) || !selectedUniversity.detailsLoaded}
               >
                 <Upload className="mx-auto h-10 w-10 text-primary mb-3" />
                 {fileName ? (
@@ -2394,14 +2407,15 @@ export function UploadLeadsTab({
                     </p>
                   </>
                 )}
-              </div>
+                {isPaused && <p className="mt-3 text-xs text-muted-foreground">Choose another CSV to prepare a separate run. This batch stays paused.</p>}
+              </button>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept=".csv"
                 onChange={handleFileUploadEvent}
                 className="hidden"
-                disabled={isProcessing || !selectedUniversity.detailsLoaded}
+                disabled={(isProcessing && !isPaused) || !selectedUniversity.detailsLoaded}
               />
             </div>
           )}
