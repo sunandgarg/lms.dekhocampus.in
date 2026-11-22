@@ -305,15 +305,17 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
         return send(response, 200, aiGateway(await readJson(request)));
       }
       if (url.pathname === '/api/functions/retry-leads' && method === 'POST') {
-        requireAdmin(user);
+        if (!await canUpload(db, user)) return send(response, 403, { error: 'Access denied' });
         const body = await readJson(request);
-        return send(response, 200, await retryLeads({ db, s3, bucket, leadIds: body.lead_ids, userId: user.id }));
+        const result = await retryLeads({ db, s3, bucket, leadIds: body.lead_ids, userId: user.id });
+        return send(response, 200, isAdmin(user) ? result : maskContactData(result));
       }
       if (url.pathname === '/api/functions/retry-inbound-delivery' && method === 'POST') {
-        requireAdmin(user);
+        if (!await canUpload(db, user)) return send(response, 403, { error: 'Access denied' });
         const body = await readJson(request);
-        return send(response, 200, await retryInboundDelivery({ db, s3, bucket,
-          batchId: body.batch_id, userId: user.id }));
+        const result = await retryInboundDelivery({ db, s3, bucket,
+          batchId: body.batch_id, userId: user.id });
+        return send(response, 200, isAdmin(user) ? result : maskContactData(result));
       }
       if (url.pathname === '/api/functions/process-queue' && method === 'POST') {
         if (!await canUpload(db, user)) return send(response, 403, { error: 'Access denied' });

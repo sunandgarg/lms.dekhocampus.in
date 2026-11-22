@@ -47,6 +47,7 @@ export interface LmsLead {
 }
 
 function tenDigitMobile(value: string) {
+  if (value.includes('*')) return value;
   const digits = String(value || '').replace(/\D/g, '');
   return digits.length >= 10 ? digits.slice(-10) : '';
 }
@@ -195,7 +196,7 @@ export function AllLeadsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [retryingBatchId, setRetryingBatchId] = useState<string | null>(null);
   const [detailLead, setDetailLead] = useState<LmsLead | null>(null);
-  const [showFilters, setShowFilters] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
   const [sortCol, setSortCol] = useState<string>("receivedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -224,9 +225,6 @@ export function AllLeadsPage() {
         // Fetch leads that are NOT from CSV upload batches
         // CSV upload batches have file_name like actual filenames (*.csv)
         // External API leads have file_name like 'API_*'
-        const { data: excludedBatches, error: batchError } = await api.functions.invoke('all-leads-excluded-batches');
-        if (batchError) throw batchError;
-        const excludeBatchIds: string[] = excludedBatches?.ids || [];
         const deliveries: Record<string, LeadDelivery[]> = {};
         for (let offset = 0; offset < inboundData.length; offset += 500) {
           const { data, error } = await api.functions.invoke('all-leads-deliveries', {
@@ -241,7 +239,6 @@ export function AllLeadsPage() {
         for (let page = 0; page < pageCount; page++) {
           let query = api.from('leads').select('*, universities(name)')
             .is('deleted_at', null).order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
-          if (excludeBatchIds.length > 0) query = query.not('batch_id', 'in', `(${excludeBatchIds.join(',')})`);
           const { data, error } = await query;
           if (error) throw error;
           leadsData.push(...(data || []));
@@ -309,11 +306,11 @@ export function AllLeadsPage() {
   const repeatKeys = useMemo(() => {
     const counts = new Map<string, number>();
     for (const lead of leads.filter((item) => item.isInbound)) {
-      const key = leadIdentity(lead);
+      const key = isAdmin ? leadIdentity(lead) : lead.id;
       if (key !== lead.id) counts.set(key, (counts.get(key) || 0) + 1);
     }
     return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));
-  }, [leads]);
+  }, [leads, isAdmin]);
 
   const filtered = useMemo(() => {
     const result = leads.filter((l) => {
@@ -322,7 +319,7 @@ export function AllLeadsPage() {
         l.triggerSource, ...Object.entries(l.extraData || {}).flat(),
         ...l.deliveries.flatMap((batch) => [batch.universities?.name || '', deliveryResult(batch)])]))
         return false;
-      if (segment === 'repeat' ? !repeatKeys.has(leadIdentity(l)) : segment !== 'all' && leadChannel(l) !== segment) return false;
+      if (segment === 'repeat' ? !repeatKeys.has(isAdmin ? leadIdentity(l) : l.id) : segment !== 'all' && leadChannel(l) !== segment) return false;
       if (statusFilter !== "all" && l.status !== statusFilter &&
           !l.deliveries.some((batch) => deliveryResult(batch) === statusFilter)) return false;
       if (sourceFilter !== "all" && attributionSource(l) !== sourceFilter) return false;
@@ -348,20 +345,20 @@ export function AllLeadsPage() {
     });
     return result;
   }, [leads, repeatKeys, search, segment, statusFilter, sourceFilter, mediumFilter, campaignFilter,
-    courseFilter, universityFilter, cityFilter, stateFilter, contactFilter, dateFrom, dateTo, sortCol, sortDir]);
+    courseFilter, universityFilter, cityFilter, stateFilter, contactFilter, dateFrom, dateTo, sortCol, sortDir, isAdmin]);
 
   // A person is grouped only when both contact identifiers agree. Every submission remains available below the row.
   const grouped = useMemo(() => {
     const groups = new Map<string, LmsLead[]>();
     for (const lead of filtered) {
-      const key = leadIdentity(lead);
+      const key = isAdmin ? leadIdentity(lead) : lead.id;
       groups.set(key, [...(groups.get(key) || []), lead]);
     }
     return [...groups.entries()].map(([key, items]) => {
       const history = [...items].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
       return { key, items: history, latest: history[0], firstAt: history[history.length - 1].receivedAt };
     });
-  }, [filtered]);
+  }, [filtered, isAdmin]);
 
   const field = (lead: LmsLead, ...names: string[]) => {
     const values = lead.extraData || {};
@@ -426,7 +423,7 @@ export function AllLeadsPage() {
   );
 
   const handleRetryDelivery = useCallback(async (batch: LeadDelivery) => {
-    if (!isAdmin || !batch.isInbound || retryingBatchId) return;
+    if (!batch.isInbound || retryingBatchId) return;
     setRetryingBatchId(batch.id);
     try {
       const { data, error } = await api.functions.invoke('retry-inbound-delivery', { body: { batch_id: batch.id } });
@@ -438,21 +435,35 @@ export function AllLeadsPage() {
     } finally {
       setRetryingBatchId(null);
     }
-  }, [isAdmin, retryingBatchId, toast, fetchLeads]);
+  }, [retryingBatchId, toast, fetchLeads]);
 
   const handleBulkRetry = useCallback(async () => {
-    const failedIds = Array.from(selectedIds).filter((id) => leads.find((l) => l.id === id)?.status === "Failed");
-    if (failedIds.length === 0) {
+    const selected = leads.filter((lead) => selectedIds.has(lead.id));
+    const failedIds = selected.filter((lead) => !lead.isInbound && lead.status === 'Failed').map((lead) => lead.id);
+    const inboundBatches = [...new Set(selected.filter((lead) => lead.isInbound)
+      .flatMap((lead) => lead.deliveries.filter((batch) => deliveryResult(batch) === 'Failed').map((batch) => batch.id)))];
+    if (!failedIds.length && !inboundBatches.length) {
       toast({ title: "No failed leads", description: "Select failed leads to retry", variant: "destructive" });
       return;
     }
-    const { error } = await api.functions.invoke('retry-leads', { body: { lead_ids: failedIds.slice(0, 100) } });
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Retries finished", description: `${Math.min(failedIds.length, 100)} leads were sent again and archived` });
+    if (failedIds.length + inboundBatches.length > 100) {
+      toast({ title: 'Select up to 100 failed deliveries', variant: 'destructive' });
+      return;
+    }
+    try {
+      if (failedIds.length) {
+        const { error } = await api.functions.invoke('retry-leads', { body: { lead_ids: failedIds } });
+        if (error) throw error;
+      }
+      for (const batchId of inboundBatches) {
+        const { error } = await api.functions.invoke('retry-inbound-delivery', { body: { batch_id: batchId } });
+        if (error) throw error;
+      }
+      toast({ title: "Retries finished", description: `${failedIds.length + inboundBatches.length} failed deliveries were retried` });
       setSelectedIds(new Set());
       fetchLeads(true);
+    } catch (error: any) {
+      toast({ title: 'Retry stopped', description: error.message, variant: 'destructive' });
     }
   }, [selectedIds, leads, toast, fetchLeads]);
 
@@ -495,7 +506,7 @@ export function AllLeadsPage() {
               <span className={`shrink-0 font-semibold ${color}`}>{result}</span>
             </div>
             {batch.error_message && <p className="mt-1 break-words text-xs text-muted-foreground">{batch.error_message}</p>}
-            {isAdmin && batch.isInbound && result === 'Failed' && <Button type="button" variant="outline" size="sm"
+            {batch.isInbound && result === 'Failed' && <Button type="button" variant="outline" size="sm"
               className="mt-2 h-8 border-red-200 text-red-700 hover:bg-red-50" disabled={!!retryingBatchId}
               onClick={() => handleRetryDelivery(batch)}>
               <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${retryingBatchId === batch.id ? 'animate-spin' : ''}`} />
@@ -667,11 +678,11 @@ export function AllLeadsPage() {
           </div>}
         </div>
 
-        {isAdmin && selectedIds.size > 0 && <div className="flex flex-wrap items-center gap-2 border-b bg-primary/5 px-4 py-2 text-sm">
+        {selectedIds.size > 0 && <div className="flex flex-wrap items-center gap-2 border-b bg-primary/5 px-4 py-2 text-sm">
           <strong>{selectedIds.size} selected</strong>
           <Button size="sm" variant="outline" onClick={handleBulkRetry}><RefreshCw className="mr-1 h-3.5 w-3.5" /> Retry failed</Button>
-          <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), 'selected-leads.csv')}><Download className="mr-1 h-3.5 w-3.5" /> Export selected</Button>
-          <Button size="sm" variant="destructive" disabled={selectedIds.size > 100} onClick={() => handleDeleteLeads([...selectedIds])}><Trash2 className="mr-1 h-3.5 w-3.5" /> Delete selected{selectedIds.size > 100 ? ' (max 100)' : ''}</Button>
+          {isAdmin && <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), 'selected-leads.csv')}><Download className="mr-1 h-3.5 w-3.5" /> Export selected</Button>}
+          {isAdmin && <Button size="sm" variant="destructive" disabled={selectedIds.size > 100} onClick={() => handleDeleteLeads([...selectedIds])}><Trash2 className="mr-1 h-3.5 w-3.5" /> Delete selected{selectedIds.size > 100 ? ' (max 100)' : ''}</Button>}
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button>
         </div>}
 
@@ -679,7 +690,7 @@ export function AllLeadsPage() {
           {loading ? <div className="flex items-center justify-center py-16 text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading leads...</div> :
           <Table className="min-w-[1420px] text-base">
             <TableHeader><TableRow className="table-header">
-              {isAdmin && <TableHead className="w-10"><Checkbox aria-label="Select all matching submissions" checked={filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>}
+              <TableHead className="w-10"><Checkbox aria-label="Select all matching submissions" checked={filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>
               {sortHeader('Name','name')}
               <TableHead>Email</TableHead>
               <TableHead>Mobile</TableHead>
@@ -696,7 +707,7 @@ export function AllLeadsPage() {
                 <Inbox className="mx-auto mb-3 h-8 w-8 opacity-40" /><p className="font-medium text-foreground">No matching leads</p><p className="mt-1 text-sm">Try another filter or refresh to check new enquiries.</p>
               </TableCell></TableRow> : grouped.flatMap(({ key, items, latest, firstAt }) =>
                 (expanded.has(key) ? items : [latest]).map((lead, index) => <TableRow key={lead.id} className={index > 0 ? 'bg-muted/20' : 'hover:bg-muted/30'}>
-                  {isAdmin && <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>}
+                  <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>
                   <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button></TableCell>
                   <TableCell className="max-w-[220px] truncate align-top text-base" title={lead.email}>{lead.email || '-'}</TableCell>
                   <TableCell className="whitespace-nowrap align-top text-base tabular-nums">{lead.mobile || '-'}</TableCell>
@@ -710,7 +721,7 @@ export function AllLeadsPage() {
                     className="inline-flex min-h-9 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>
                     {expanded.has(key) ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}{items.length} entries</button> : index === 0 ? <span className="text-xs text-muted-foreground">First seen {formatDate(firstAt)}</span> : <span className="text-xs text-muted-foreground">History</span>}</TableCell>
                   <TableCell className="align-top"><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`View details for ${lead.name || 'lead'}`} onClick={() => setDetailLead(lead)}><Eye className="h-4 w-4" /></Button>
-                    {isAdmin && lead.status === 'Failed' && <Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`Retry ${lead.name || 'lead'}`} onClick={() => handleRetryLead(lead)}><RefreshCw className="h-4 w-4" /></Button>}
+                    {lead.status === 'Failed' && <Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`Retry ${lead.name || 'lead'}`} onClick={() => handleRetryLead(lead)}><RefreshCw className="h-4 w-4" /></Button>}
                     {isAdmin && <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" aria-label={`Delete submission for ${lead.name || 'lead'}`} onClick={() => handleDeleteLeads([lead.id])}><Trash2 className="h-4 w-4" /></Button>}</div></TableCell>
                 </TableRow>))}
             </TableBody>
@@ -785,7 +796,7 @@ export function AllLeadsPage() {
                   <dl className="grid grid-cols-2 gap-3">{Object.entries(detailLead.extraData).map(([label,value]) => detailField(detailLead,label,value))}</dl>
                 </section>}
 
-                {isAdmin && detailLead.status === "Failed" && (
+                {detailLead.status === "Failed" && (
                   <Button
                     className="w-full"
                     onClick={() => {
