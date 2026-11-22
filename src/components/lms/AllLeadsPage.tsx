@@ -15,6 +15,7 @@ import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
 import { deliveryResult, summarizeDeliveries, type LeadDelivery } from './delivery-summary';
+import { maskContactText, maskEmail, maskMobile } from '@/utils/contactMask';
 
 export interface LmsLead {
   id: string;
@@ -114,7 +115,7 @@ function leadDay(lead: LmsLead) {
   return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
-function downloadCSV(data: LmsLead[], filename: string) {
+function downloadCSV(data: LmsLead[], filename: string, masked = false) {
   const headers = [
     "Lead ID",
     "Name",
@@ -134,9 +135,9 @@ function downloadCSV(data: LmsLead[], filename: string) {
   const rows = data.map((l) => [
     l.id.slice(0, 8),
     l.name,
-    l.email,
-    l.mobile,
-    l.originalMobile,
+    masked ? (l.email.includes('*') ? l.email : maskEmail(l.email)) : l.email,
+    masked ? (l.mobile.includes('*') ? l.mobile : maskMobile(l.mobile)) : l.mobile,
+    masked ? (l.originalMobile.includes('*') ? l.originalMobile : maskMobile(l.originalMobile)) : l.originalMobile,
     l.city,
     l.course,
     attributionSource(l),
@@ -144,7 +145,7 @@ function downloadCSV(data: LmsLead[], filename: string) {
     l.campaign,
     l.university,
     l.status,
-    l.failReason,
+    masked ? maskContactText(l.failReason) : l.failReason,
     l.receivedAt,
   ]);
   const csv = [headers, ...rows].map((r) => r.map((c) => {
@@ -211,8 +212,10 @@ export function AllLeadsPage() {
         for (let page = 0; page < pageCount; page++) {
           const { data, error } = await api.from('inbound_leads')
             .select('*').is('deleted_at', null).order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
-          if (error && error.status !== 403) throw error;
-          if (error) break;
+          if (error) {
+            console.error('Could not load incoming leads:', error);
+            break;
+          }
           inboundData.push(...(data || []));
           inboundHasMore = data?.length === 500;
           if (!inboundHasMore) break;
@@ -230,8 +233,11 @@ export function AllLeadsPage() {
           const { data, error } = await api.functions.invoke('all-leads-deliveries', {
             body: { lead_ids: inboundData.slice(offset, offset + 500).map((lead) => lead.id) },
           });
-          if (error) throw error;
-          Object.assign(deliveries, data.deliveries);
+          if (error) {
+            console.error('Could not load lead delivery summary:', error);
+            continue;
+          }
+          Object.assign(deliveries, data?.deliveries || {});
         }
 
         const leadsData: any[] = [];
@@ -240,7 +246,10 @@ export function AllLeadsPage() {
           let query = api.from('leads').select('*, universities(name)')
             .is('deleted_at', null).order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
           const { data, error } = await query;
-          if (error) throw error;
+          if (error) {
+            console.error('Could not load partner lead history:', error);
+            break;
+          }
           leadsData.push(...(data || []));
           existingHasMore = data?.length === 500;
           if (!existingHasMore) break;
@@ -287,7 +296,7 @@ export function AllLeadsPage() {
           skippedDestinations: lead.skipped_destinations || 0,
           deliveries: (deliveries[lead.id] || []).map((batch) => ({ ...batch, isInbound: true })),
         }));
-        setLeads([...incoming, ...mapped].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)));
+        setLeads([...incoming, ...mapped].sort((a, b) => (b.receivedAt || '').localeCompare(a.receivedAt || '')));
         setHasMore(inboundHasMore || existingHasMore);
       } catch (err: any) {
         console.error("Error fetching leads:", err);
@@ -626,9 +635,9 @@ export function AllLeadsPage() {
               <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} aria-expanded={showFilters}>
                 <Filter className="mr-2 h-4 w-4" /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
               </Button>
-              {isAdmin && <Button variant="outline" size="sm" onClick={() => downloadCSV(grouped.map((group) => group.latest), 'lead-inbox-view.csv')} disabled={!grouped.length}>
-                <Download className="mr-2 h-4 w-4" /> Export leads
-              </Button>}
+              <Button variant="outline" size="sm" onClick={() => downloadCSV(filtered, isAdmin ? 'all-leads.csv' : 'all-leads-masked.csv', !isAdmin)} disabled={!filtered.length}>
+                <Download className="mr-2 h-4 w-4" /> {isAdmin ? 'Download leads' : 'Download masked leads'}
+              </Button>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 border-b pb-3 sm:grid-cols-3 xl:grid-cols-5" aria-label="Lead groups">
@@ -681,7 +690,7 @@ export function AllLeadsPage() {
         {selectedIds.size > 0 && <div className="flex flex-wrap items-center gap-2 border-b bg-primary/5 px-4 py-2 text-sm">
           <strong>{selectedIds.size} selected</strong>
           <Button size="sm" variant="outline" onClick={handleBulkRetry}><RefreshCw className="mr-1 h-3.5 w-3.5" /> Retry failed</Button>
-          {isAdmin && <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), 'selected-leads.csv')}><Download className="mr-1 h-3.5 w-3.5" /> Export selected</Button>}
+          <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), isAdmin ? 'selected-leads.csv' : 'selected-leads-masked.csv', !isAdmin)}><Download className="mr-1 h-3.5 w-3.5" /> {isAdmin ? 'Download selected' : 'Download selected masked'}</Button>
           {isAdmin && <Button size="sm" variant="destructive" disabled={selectedIds.size > 100} onClick={() => handleDeleteLeads([...selectedIds])}><Trash2 className="mr-1 h-3.5 w-3.5" /> Delete selected{selectedIds.size > 100 ? ' (max 100)' : ''}</Button>}
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button>
         </div>}

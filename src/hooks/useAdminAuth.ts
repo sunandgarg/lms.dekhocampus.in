@@ -101,7 +101,7 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
     if (cachedState && !isInitialCheckDoneRef.current) {
       setState({
         isAdmin: cachedState.isAdmin,
-        isApproved: cachedState.isApproved,
+        isApproved: Boolean(user.is_approved),
         loading: false,
         userEmail: cachedState.userEmail || user.email || null,
         error: null,
@@ -158,8 +158,8 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
       isInitialCheckDoneRef.current = true;
 
       const nextState = {
-        isAdmin: !!hasAdminRole,
-        isApproved: !!approvedData,
+        isAdmin: roleError ? user.role === 'admin' || user.role === 'super_admin' : !!hasAdminRole,
+        isApproved: approvedError ? Boolean(user.is_approved) : !!approvedData,
         loading: false,
         userEmail: user.email ?? null,
         error: null,
@@ -172,7 +172,7 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
       const fallbackState = cachedState
         ? {
             isAdmin: cachedState.isAdmin,
-            isApproved: cachedState.isApproved,
+            isApproved: Boolean(user.is_approved),
             loading: false,
             userEmail: cachedState.userEmail || user.email || null,
             error: null,
@@ -181,7 +181,7 @@ export function useAdminAuth(): AdminAuthState & { refetch: () => Promise<void> 
             isAdmin: false,
             // Never deadlock the whole app behind a transient approval check.
             // Admin-only surfaces still remain hidden unless the role check succeeds.
-            isApproved: true,
+            isApproved: Boolean(user.is_approved),
             loading: false,
             userEmail: user.email ?? null,
             error: null,
