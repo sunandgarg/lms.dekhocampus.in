@@ -179,6 +179,10 @@ export function AllLeadsPage() {
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const [leads, setLeads] = useState<LmsLead[]>([]);
   const [pageCount, setPageCount] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [rowsPerPageMode, setRowsPerPageMode] = useState('25');
+  const [customRows, setCustomRows] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -369,6 +373,15 @@ export function AllLeadsPage() {
     });
   }, [filtered, isAdmin]);
 
+  const totalPages = Math.max(1, Math.ceil(grouped.length / rowsPerPage));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageGroups = grouped.slice((safePage - 1) * rowsPerPage, safePage * rowsPerPage);
+  const visibleRows = pageGroups.flatMap(({ key, items, latest }) => expanded.has(key) ? items : [latest]);
+
+  useEffect(() => { setCurrentPage(1); }, [search, segment, statusFilter, sourceFilter, mediumFilter,
+    campaignFilter, courseFilter, universityFilter, cityFilter, stateFilter, contactFilter, dateFrom, dateTo,
+    sortCol, sortDir, rowsPerPage]);
+
   const field = (lead: LmsLead, ...names: string[]) => {
     const values = lead.extraData || {};
     const found = Object.entries(values).find(([key]) => names.some((name) =>
@@ -411,8 +424,8 @@ export function AllLeadsPage() {
   const toggleAll = () => {
     setSelectedIds((current) => {
       const next = new Set(current);
-      if (filtered.every((lead) => next.has(lead.id))) filtered.forEach((lead) => next.delete(lead.id));
-      else filtered.forEach((lead) => next.add(lead.id));
+      if (visibleRows.every((lead) => next.has(lead.id))) visibleRows.forEach((lead) => next.delete(lead.id));
+      else visibleRows.forEach((lead) => next.add(lead.id));
       return next;
     });
   };
@@ -699,7 +712,7 @@ export function AllLeadsPage() {
           {loading ? <div className="flex items-center justify-center py-16 text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading leads...</div> :
           <Table className="min-w-[1420px] text-base">
             <TableHeader><TableRow className="table-header">
-              <TableHead className="w-10"><Checkbox aria-label="Select all matching submissions" checked={filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>
+              <TableHead className="w-10"><Checkbox aria-label="Select all leads shown on this page" checked={visibleRows.length > 0 && visibleRows.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>
               {sortHeader('Name','name')}
               <TableHead>Email</TableHead>
               <TableHead>Mobile</TableHead>
@@ -712,9 +725,9 @@ export function AllLeadsPage() {
               <TableHead className="w-28 text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {grouped.length === 0 ? <TableRow><TableCell colSpan={isAdmin ? 11 : 10} className="py-16 text-center text-muted-foreground">
+              {grouped.length === 0 ? <TableRow><TableCell colSpan={11} className="py-16 text-center text-muted-foreground">
                 <Inbox className="mx-auto mb-3 h-8 w-8 opacity-40" /><p className="font-medium text-foreground">No matching leads</p><p className="mt-1 text-sm">Try another filter or refresh to check new enquiries.</p>
-              </TableCell></TableRow> : grouped.flatMap(({ key, items, latest, firstAt }) =>
+              </TableCell></TableRow> : pageGroups.flatMap(({ key, items, latest, firstAt }) =>
                 (expanded.has(key) ? items : [latest]).map((lead, index) => <TableRow key={lead.id} className={index > 0 ? 'bg-muted/20' : 'hover:bg-muted/30'}>
                   <TableCell><Checkbox aria-label={`Select ${lead.name || lead.email || 'lead'}`} checked={selectedIds.has(lead.id)} onCheckedChange={() => toggleSelect(lead.id)} /></TableCell>
                   <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button></TableCell>
@@ -736,9 +749,27 @@ export function AllLeadsPage() {
             </TableBody>
           </Table>}
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground">
-          <span>Showing {grouped.length} leads. Matching email and mobile submissions are nested in each lead's history.</span>
-          {isAdmin && <span>Export includes one row per visible lead.</span>}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-muted-foreground">
+          <span>Showing {grouped.length ? (safePage - 1) * rowsPerPage + 1 : 0}–{Math.min(safePage * rowsPerPage, grouped.length)} of {grouped.length} matching leads. Selection applies to this page.</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span>Rows per page</span>
+            <Select value={rowsPerPageMode} onValueChange={(value) => {
+              setRowsPerPageMode(value);
+              if (value !== 'custom') setRowsPerPage(Number(value));
+            }}><SelectTrigger className="h-9 w-24" aria-label="Rows per page"><SelectValue /></SelectTrigger><SelectContent>
+              {['10', '25', '50', '100'].map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent></Select>
+            {rowsPerPageMode === 'custom' && <Input type="number" min={1} max={1000} aria-label="Custom rows per page" placeholder="1–1000" className="h-9 w-24" value={customRows}
+              onChange={(event) => {
+                setCustomRows(event.target.value);
+                const value = Number(event.target.value);
+                if (Number.isInteger(value) && value >= 1 && value <= 1000) setRowsPerPage(value);
+              }} />}
+            <Button variant="outline" size="sm" disabled={safePage <= 1} onClick={() => setCurrentPage(safePage - 1)}>Previous</Button>
+            <span className="min-w-16 text-center">{safePage} / {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={safePage >= totalPages} onClick={() => setCurrentPage(safePage + 1)}>Next</Button>
+          </div>
         </div>
       </Card>
       {hasMore && <div className="text-center"><Button variant="outline" onClick={() => setPageCount((count) => count + 1)} disabled={loading}>Load older leads</Button></div>}
