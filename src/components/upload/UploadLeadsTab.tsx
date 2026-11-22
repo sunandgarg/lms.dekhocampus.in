@@ -1933,7 +1933,7 @@ export function UploadLeadsTab({
       setIsBackgroundPolling(true);
       setAlert({ type: 'info', message: sealed.status === 'scheduled'
         ? `Queued ${leads.length} leads for ${scheduledAt?.toLocaleString()}. The server will start automatically at ${batchRate} leads/minute.`
-        : `Queued ${leads.length} leads. The server is sending at up to ${batchRate} leads/minute; you can close this page.` });
+        : `Queued ${leads.length} leads.` });
     } catch (error) {
       console.error("Processing error:", error);
       if (newBatchId) {
