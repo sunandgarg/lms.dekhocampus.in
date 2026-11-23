@@ -86,6 +86,24 @@ export function MultiPushView({ universities }: MultiPushViewProps) {
   const [quickLead, setQuickLead] = useState({ name: '', email: '', mobile: '' });
   const [throughput, setThroughput] = useState<{ done: number; elapsedMs: number }>({ done: 0, elapsedMs: 0 });
 
+  useEffect(() => {
+    const transfer = sessionStorage.getItem('lms-multipush-selection');
+    if (!transfer) return;
+    sessionStorage.removeItem('lms-multipush-selection');
+    try {
+      const rows = JSON.parse(transfer) as CsvLead[];
+      if (!Array.isArray(rows) || !rows.length || rows.some((row) => !row || typeof row !== 'object')) throw new Error('Invalid lead selection');
+      const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+      const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+      setLeads(rows);
+      setFileName(`all-leads-selection-${rows.length}.csv`);
+      setSourceCsv([headers.map(cell).join(','), ...rows.map((row) => headers.map((key) => cell(row[key])).join(','))].join('\n'));
+      toast({ title: `${rows.length} leads ready`, description: 'Choose one or more universities, then review and start the push.' });
+    } catch {
+      toast({ title: 'Could not load selected leads', description: 'Select the leads again in All Leads.', variant: 'destructive' });
+    }
+  }, [toast]);
+
 
   // Fetch presets + defaults (from universities.default_values) on mount
   useEffect(() => {

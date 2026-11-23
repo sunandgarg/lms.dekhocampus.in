@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useNavigate } from 'react-router-dom';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -182,6 +183,7 @@ function mapStatus(s: string | null): string {
 }
 
 export function AllLeadsPage() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
@@ -503,6 +505,20 @@ export function AllLeadsPage() {
   const handleBulkRetry = useCallback(() => prepareRetry(leads.filter((lead) => selectedIds.has(lead.id))),
     [prepareRetry, leads, selectedIds]);
 
+  const pushSelectedToUniversities = () => {
+    if (!isAdmin) return;
+    const selected = leads.filter((lead) => selectedIds.has(lead.id));
+    if (!selected.length) return;
+    const rows = selected.map((lead) => ({
+      ...Object.fromEntries(Object.entries(lead.extraData || {}).filter(([, value]) => typeof value === 'string')),
+      name: lead.name, email: lead.email, mobile: lead.mobile, city: lead.city,
+      course: lead.course, specialization: lead.specialization, state: leadState(lead),
+      leadSource: attributionSource(lead), leadMedium: lead.medium, leadCampaign: lead.campaign,
+    }));
+    sessionStorage.setItem('lms-multipush-selection', JSON.stringify(rows));
+    navigate('/lead-push/multi-push');
+  };
+
   const retryUniversities = [...new Map(retryCandidates.map((candidate) =>
     [candidate.universityId, candidate.universityName] as const)).entries()];
   const chosenRetryCandidates = retryCandidates.filter((candidate) =>
@@ -821,6 +837,7 @@ export function AllLeadsPage() {
           <Button size="sm" variant="outline" disabled={retryDiscovering || retryRunning} onClick={handleBulkRetry}>
             <RefreshCw className={`mr-1 h-3.5 w-3.5 ${retryDiscovering ? 'animate-spin' : ''}`} /> {retryDiscovering ? 'Finding failures…' : 'Retry failed'}
           </Button>
+          {isAdmin && <Button size="sm" variant="outline" onClick={pushSelectedToUniversities}><Zap className="mr-1 h-3.5 w-3.5" /> Push to universities</Button>}
           <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), isAdmin ? 'selected-leads.csv' : 'selected-leads-masked.csv', !isAdmin)}><Download className="mr-1 h-3.5 w-3.5" /> {isAdmin ? 'Download selected' : 'Download selected masked'}</Button>
           {isAdmin && <Button size="sm" variant="destructive" disabled={selectedIds.size > 100} onClick={() => requestDelete([...selectedIds])}><Trash2 className="mr-1 h-3.5 w-3.5" /> Delete selected{selectedIds.size > 100 ? ' (max 100)' : ''}</Button>}
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button>
