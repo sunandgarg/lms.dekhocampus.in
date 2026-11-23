@@ -242,14 +242,6 @@ export function AllLeadsPage() {
           inboundHasMore = data?.length === 500;
           if (!inboundHasMore) break;
         }
-        // Only fetch leads that came from campaigns/external sources - NOT from CSV upload batches
-        // We identify upload-pushed leads by checking if their batch came from a file upload
-        // Instead, we filter by looking at batches where file_name starts with 'API_' (external)
-        // or leads that have no batch_id, or leads from marketing campaigns
-
-        // Fetch leads that are NOT from CSV upload batches
-        // CSV upload batches have file_name like actual filenames (*.csv)
-        // External API leads have file_name like 'API_*'
         const deliveries: Record<string, LeadDelivery[]> = {};
         for (let offset = 0; offset < inboundData.length; offset += 500) {
           const { data, error } = await api.functions.invoke('all-leads-deliveries', {
@@ -261,48 +253,6 @@ export function AllLeadsPage() {
           }
           Object.assign(deliveries, data?.deliveries || {});
         }
-
-        const leadsData: any[] = [];
-        const { data: universityRows } = await api.from('universities').select('id,name').range(0, 999);
-        const universityNames = new Map((universityRows || []).map((row: any) => [row.id, row.name]));
-        let existingHasMore = false;
-        for (let page = 0; page < pageCount; page++) {
-          let query = api.from('leads').select('*, universities(name)')
-            .is('deleted_at', null).order('created_at', { ascending: false }).range(page * 500, page * 500 + 499);
-          const { data, error } = await query;
-          if (error) {
-            console.error('Could not load partner lead history:', error);
-            break;
-          }
-          leadsData.push(...(data || []));
-          existingHasMore = data?.length === 500;
-          if (!existingHasMore) break;
-        }
-
-        const mapped: LmsLead[] = (leadsData || []).map((l: any) => ({
-          id: l.id,
-          name: l.name || "",
-          email: l.email || "",
-          mobile: tenDigitMobile(l.mobile || ""), originalMobile: l.mobile || "",
-          city: l.city || "",
-          course: l.course || "",
-          specialization: l.specialization || "",
-          source: l.lead_source || "Manual",
-          medium: l.lead_medium || '',
-          campaign: l.lead_campaign || "",
-          university: universityNames.get(l.university_id) || l.universities?.name || "Unknown",
-          universityId: l.university_id,
-          status: mapStatus(l.status),
-          failReason: l.status === "Fail" || l.status === "failed" ? l.api_response || "Unknown error" : "",
-          receivedAt: l.created_at,
-          apiResponse: l.api_response || "",
-          retryCount: l.retry_count || 0,
-          batchId: l.batch_id,
-          triggerSource: l.lead_source || "Unknown",
-          deliveries: [{ id: l.batch_id || l.id, status: l.status, success_count: l.status === 'Success' ? 1 : 0,
-            duplicate_count: l.status === 'Duplicate' ? 1 : 0, fail_count: ['Fail', 'failed'].includes(l.status) ? 1 : 0,
-            universities: { name: universityNames.get(l.university_id) || l.universities?.name || 'Unknown destination' } }],
-        }));
 
         const incoming: LmsLead[] = (inboundData || []).map((lead: any) => ({
           id: lead.id, name: lead.name || '', email: lead.email || '',
@@ -320,8 +270,8 @@ export function AllLeadsPage() {
           skippedDestinations: lead.skipped_destinations || 0,
           deliveries: (deliveries[lead.id] || []).map((batch) => ({ ...batch, isInbound: true })),
         }));
-        setLeads([...incoming, ...mapped].sort((a, b) => (b.receivedAt || '').localeCompare(a.receivedAt || '')));
-        setHasMore(inboundHasMore || existingHasMore);
+        setLeads(incoming.sort((a, b) => (b.receivedAt || '').localeCompare(a.receivedAt || '')));
+        setHasMore(inboundHasMore);
       } catch (err: any) {
         console.error("Error fetching leads:", err);
         toast({ title: "Error", description: "Failed to load leads", variant: "destructive" });
