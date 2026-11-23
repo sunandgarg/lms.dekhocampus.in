@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
@@ -15,6 +16,7 @@ import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
 import { deliveryResult, summarizeDeliveries, type LeadDelivery } from './delivery-summary';
+import { retrySources } from './retry-sources';
 import { maskContactText, maskEmail, maskMobile } from '@/utils/contactMask';
 
 export interface LmsLead {
@@ -45,6 +47,12 @@ export interface LmsLead {
   matchedRules?: string[];
   skippedDestinations?: number;
   deliveries: LeadDelivery[];
+}
+
+interface RetryCandidate {
+  id: string;
+  universityId: string;
+  universityName: string;
 }
 
 function tenDigitMobile(value: string) {
@@ -199,7 +207,12 @@ export function AllLeadsPage() {
   const [dateTo, setDateTo] = useState('');
   const [segment, setSegment] = useState('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [retryingBatchId, setRetryingBatchId] = useState<string | null>(null);
+  const [retryCandidates, setRetryCandidates] = useState<RetryCandidate[]>([]);
+  const [retryUniversityId, setRetryUniversityId] = useState('');
+  const [retryOpen, setRetryOpen] = useState(false);
+  const [retryDiscovering, setRetryDiscovering] = useState(false);
+  const [retryRunning, setRetryRunning] = useState(false);
+  const [retryProgress, setRetryProgress] = useState(0);
   const [detailLead, setDetailLead] = useState<LmsLead | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [sortCol, setSortCol] = useState<string>("receivedAt");
@@ -436,64 +449,81 @@ export function AllLeadsPage() {
     });
   };
 
-  const handleRetryLead = useCallback(
-    async (lead: LmsLead) => {
-      toast({ title: "Retrying...", description: `Retrying ${lead.name}` });
-      const { error } = await api.functions.invoke('retry-leads', { body: { lead_ids: [lead.id] } });
-      if (error) {
-        toast({ title: "Error", description: error.message, variant: "destructive" });
-      } else {
-        toast({ title: "Retry finished", description: `${lead.name} was sent again and archived` });
-        fetchLeads(true);
-      }
-    },
-    [toast, fetchLeads],
-  );
-
-  const handleRetryDelivery = useCallback(async (batch: LeadDelivery) => {
-    if (!batch.isInbound || retryingBatchId) return;
-    setRetryingBatchId(batch.id);
+  const prepareRetry = useCallback(async (selected: LmsLead[], onlyBatchId?: string) => {
+    if (retryDiscovering || retryRunning) return;
+    setRetryDiscovering(true);
     try {
-      const { data, error } = await api.functions.invoke('retry-inbound-delivery', { body: { batch_id: batch.id } });
-      if (error) throw error;
-      toast({ title: 'Retry completed', description: `${batch.universities?.name || 'University'}: ${data.results?.[0]?.status || 'check delivery result'}` });
+      const { directIds, batchIds } = retrySources(selected, onlyBatchId);
+      const candidates = new Map<string, RetryCandidate>();
+      for (const [field, ids] of [['id', directIds], ['batch_id', batchIds]] as const) {
+        for (let start = 0; start < ids.length; start += 250) {
+          for (let offset = 0; ; offset += 1000) {
+            const { data, error } = await api.from('leads')
+              .select('id,university_id,retry_count,universities(name)')
+              .in(field, ids.slice(start, start + 250)).in('status', ['Fail', 'failed'])
+              .is('deleted_at', null).range(offset, offset + 999);
+            if (error) throw error;
+            for (const row of data || []) {
+              if (Number(row.retry_count || 0) >= 3) continue;
+              candidates.set(row.id, { id: row.id, universityId: row.university_id,
+                universityName: row.universities?.name || 'University' });
+            }
+            if ((data || []).length < 1000) break;
+          }
+        }
+      }
+      const found = [...candidates.values()];
+      if (!found.length) {
+        toast({ title: 'No failed leads to retry', description: 'The selected deliveries have no eligible failed lead records.' });
+        return;
+      }
+      const universities = new Set(found.map((candidate) => candidate.universityId));
+      setRetryCandidates(found);
+      setRetryUniversityId(universities.size === 1 ? [...universities][0] : '');
+      setRetryProgress(0);
+      setRetryOpen(true);
+    } catch (error: any) {
+      toast({ title: 'Could not check failed leads', description: error.message, variant: 'destructive' });
+    } finally {
+      setRetryDiscovering(false);
+    }
+  }, [retryDiscovering, retryRunning, toast]);
+
+  const handleRetryLead = useCallback((lead: LmsLead) => prepareRetry([lead]), [prepareRetry]);
+  const handleRetryDelivery = useCallback((batch: LeadDelivery) => prepareRetry([], batch.id), [prepareRetry]);
+  const handleBulkRetry = useCallback(() => prepareRetry(leads.filter((lead) => selectedIds.has(lead.id))),
+    [prepareRetry, leads, selectedIds]);
+
+  const retryUniversities = [...new Map(retryCandidates.map((candidate) =>
+    [candidate.universityId, candidate.universityName] as const)).entries()];
+  const chosenRetryCandidates = retryCandidates.filter((candidate) =>
+    retryUniversityId === 'all' || candidate.universityId === retryUniversityId);
+
+  const runRetry = async () => {
+    if (!retryUniversityId || !chosenRetryCandidates.length || retryRunning) return;
+    setRetryRunning(true);
+    let attempted = 0;
+    try {
+      // Small requests keep partner timeouts below the proxy deadline.
+      for (let start = 0; start < chosenRetryCandidates.length; start += 2) {
+        const ids = chosenRetryCandidates.slice(start, start + 2).map((candidate) => candidate.id);
+        const { data, error } = await api.functions.invoke('retry-leads', { body: { lead_ids: ids } });
+        if (error) throw error;
+        attempted += Number(data?.retried || 0);
+        setRetryProgress(Math.min(start + 2, chosenRetryCandidates.length));
+      }
+      toast({ title: 'Retry completed', description: `${attempted} failed lead${attempted === 1 ? '' : 's'} retried. Review the updated delivery results.` });
+      setRetryOpen(false);
+      setSelectedIds(new Set());
       await fetchLeads(true);
     } catch (error: any) {
-      toast({ title: 'Could not retry this delivery', description: error.message, variant: 'destructive' });
+      toast({ title: 'Retry stopped', description: `${attempted} retried before the error. ${error.message} Refresh the lead list before retrying again.`, variant: 'destructive' });
+      setRetryOpen(false);
+      await fetchLeads(true);
     } finally {
-      setRetryingBatchId(null);
+      setRetryRunning(false);
     }
-  }, [retryingBatchId, toast, fetchLeads]);
-
-  const handleBulkRetry = useCallback(async () => {
-    const selected = leads.filter((lead) => selectedIds.has(lead.id));
-    const failedIds = selected.filter((lead) => !lead.isInbound && lead.status === 'Failed').map((lead) => lead.id);
-    const inboundBatches = [...new Set(selected.filter((lead) => lead.isInbound)
-      .flatMap((lead) => lead.deliveries.filter((batch) => deliveryResult(batch) === 'Failed').map((batch) => batch.id)))];
-    if (!failedIds.length && !inboundBatches.length) {
-      toast({ title: "No failed leads", description: "Select failed leads to retry", variant: "destructive" });
-      return;
-    }
-    if (failedIds.length + inboundBatches.length > 100) {
-      toast({ title: 'Select up to 100 failed deliveries', variant: 'destructive' });
-      return;
-    }
-    try {
-      if (failedIds.length) {
-        const { error } = await api.functions.invoke('retry-leads', { body: { lead_ids: failedIds } });
-        if (error) throw error;
-      }
-      for (const batchId of inboundBatches) {
-        const { error } = await api.functions.invoke('retry-inbound-delivery', { body: { batch_id: batchId } });
-        if (error) throw error;
-      }
-      toast({ title: "Retries finished", description: `${failedIds.length + inboundBatches.length} failed deliveries were retried` });
-      setSelectedIds(new Set());
-      fetchLeads(true);
-    } catch (error: any) {
-      toast({ title: 'Retry stopped', description: error.message, variant: 'destructive' });
-    }
-  }, [selectedIds, leads, toast, fetchLeads]);
+  };
 
   const handleDeleteLeads = useCallback(async (ids: string[]) => {
     if (!isAdmin || !ids.length || !window.confirm(
@@ -534,11 +564,11 @@ export function AllLeadsPage() {
               <span className={`shrink-0 font-semibold ${color}`}>{result}</span>
             </div>
             {batch.error_message && <p className="mt-1 break-words text-xs text-muted-foreground">{batch.error_message}</p>}
-            {batch.isInbound && result === 'Failed' && <Button type="button" variant="outline" size="sm"
-              className="mt-2 h-8 border-red-200 text-red-700 hover:bg-red-50" disabled={!!retryingBatchId}
+            {batch.isInbound && Number(batch.fail_count || 0) > 0 && <Button type="button" variant="outline" size="sm"
+              className="mt-2 h-8 border-red-200 text-red-700 hover:bg-red-50" disabled={retryDiscovering || retryRunning}
               onClick={() => handleRetryDelivery(batch)}>
-              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${retryingBatchId === batch.id ? 'animate-spin' : ''}`} />
-              {retryingBatchId === batch.id ? 'Retrying…' : 'Retry this university'}
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${retryDiscovering ? 'animate-spin' : ''}`} />
+              Retry this university
             </Button>}
           </div>
         </div>;
@@ -699,9 +729,39 @@ export function AllLeadsPage() {
           </div>}
         </div>
 
+        <Dialog open={retryOpen} onOpenChange={(open) => { if (!retryRunning) setRetryOpen(open); }}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Retry failed university leads</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">Only actual failed lead records are eligible. Successful, duplicate, pending, and unavailable records will not be sent again.</p>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">University</label>
+              <Select value={retryUniversityId} onValueChange={setRetryUniversityId} disabled={retryRunning}>
+                <SelectTrigger aria-label="University to retry"><SelectValue placeholder="Choose a university" /></SelectTrigger>
+                <SelectContent>
+                  {retryUniversities.length > 1 && <SelectItem value="all">All failed universities ({retryCandidates.length})</SelectItem>}
+                  {retryUniversities.map(([id, name]) => <SelectItem key={id} value={id}>
+                    {name} ({retryCandidates.filter((candidate) => candidate.universityId === id).length})
+                  </SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-sm">{retryUniversityId ? `${chosenRetryCandidates.length} failed lead${chosenRetryCandidates.length === 1 ? '' : 's'} selected for retry` : 'Choose where to retry the failed leads.'}</p>
+            {retryRunning && <p className="text-sm text-muted-foreground">Processed {retryProgress} of {chosenRetryCandidates.length}. Keep this page open until it finishes.</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={retryRunning} onClick={() => setRetryOpen(false)}>Cancel</Button>
+              <Button disabled={!retryUniversityId || !chosenRetryCandidates.length || retryRunning} onClick={runRetry}>
+                {retryRunning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Retry {chosenRetryCandidates.length || ''} failed
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {selectedIds.size > 0 && <div className="flex flex-wrap items-center gap-2 border-b bg-primary/5 px-4 py-2 text-sm">
           <strong>{selectedIds.size} selected</strong>
-          <Button size="sm" variant="outline" onClick={handleBulkRetry}><RefreshCw className="mr-1 h-3.5 w-3.5" /> Retry failed</Button>
+          <Button size="sm" variant="outline" disabled={retryDiscovering || retryRunning} onClick={handleBulkRetry}>
+            <RefreshCw className={`mr-1 h-3.5 w-3.5 ${retryDiscovering ? 'animate-spin' : ''}`} /> {retryDiscovering ? 'Finding failures…' : 'Retry failed'}
+          </Button>
           <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), isAdmin ? 'selected-leads.csv' : 'selected-leads-masked.csv', !isAdmin)}><Download className="mr-1 h-3.5 w-3.5" /> {isAdmin ? 'Download selected' : 'Download selected masked'}</Button>
           {isAdmin && <Button size="sm" variant="destructive" disabled={selectedIds.size > 100} onClick={() => handleDeleteLeads([...selectedIds])}><Trash2 className="mr-1 h-3.5 w-3.5" /> Delete selected{selectedIds.size > 100 ? ' (max 100)' : ''}</Button>}
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button>
