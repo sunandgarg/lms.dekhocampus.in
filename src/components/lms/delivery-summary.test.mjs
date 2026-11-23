@@ -9,4 +9,5 @@ test('delivery battery counts the latest result once per university', () => {
   const result = summarizeDeliveries([{ deliveries: [amity, lpu] }, { deliveries: [oldAmity] }]);
   assert.deepEqual(result, { deliveries: [amity, lpu], pushed: 1, notPushed: 1, pending: 0 });
   assert.deepEqual(summarizeDeliveries([{ deliveries: [{ id: 'p', status: 'processing' }] }]).pending, 1);
+  assert.deepEqual(summarizeDeliveries([{ deliveries: [{ id: 'paused', status: 'paused' }] }]).pending, 1);
 });

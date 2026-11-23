@@ -12,7 +12,7 @@ export interface LeadDelivery {
 export function deliveryResult(batch: LeadDelivery): 'Pushed' | 'Duplicate' | 'Failed' | 'Pending' {
   if (Number(batch.success_count) > 0) return 'Pushed';
   if (Number(batch.duplicate_count) > 0) return 'Duplicate';
-  if (Number(batch.fail_count) > 0 || ['failed', 'cancelled', 'paused', 'completed'].includes(String(batch.status).toLowerCase())) return 'Failed';
+  if (Number(batch.fail_count) > 0 || ['failed', 'cancelled', 'completed'].includes(String(batch.status).toLowerCase())) return 'Failed';
   return 'Pending';
 }
 

@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, Users, X, Trash2, CheckCircle2, XCircle, Clock3 } from "lucide-react";
+import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, X, Trash2, CheckCircle2, XCircle, Clock3 } from "lucide-react";
 import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
@@ -395,6 +395,13 @@ export function AllLeadsPage() {
       google: count(leads.filter((lead) => leadChannel(lead) === 'google')),
       other: count(leads.filter((lead) => leadChannel(lead) === 'other')), repeat: repeatKeys.size };
   }, [leads, repeatKeys]);
+  const viewSummary = useMemo(() => grouped.reduce((counts, group) => {
+    const { deliveries, pushed, notPushed } = summarizeDeliveries(group.items);
+    if (!deliveries.length) counts.inboxOnly++;
+    if (pushed) counts.sent++;
+    if (notPushed) counts.needsAttention++;
+    return counts;
+  }, { inboxOnly: 0, sent: 0, needsAttention: 0 }), [grouped]);
 
   const sources = useMemo(() => [...new Set(leads.map(attributionSource).filter((value) => value !== '-'))], [leads]);
   const media = useMemo(() => [...new Set(leads.map((lead) => lead.medium).filter(Boolean))], [leads]);
@@ -545,10 +552,10 @@ export function AllLeadsPage() {
     const total = deliveries.length;
     return <Popover>
       <PopoverTrigger asChild>
-        <button type="button" aria-label={`View university deliveries: ${pushed} pushed, ${notPushed} not pushed, ${pending} pending`}
-          className="group w-[216px] rounded-xl border bg-background px-3 py-2.5 text-left shadow-sm transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <button type="button" aria-label={`View university deliveries: ${pushed} sent, ${notPushed} need attention, ${pending} pending`}
+          className="group w-[196px] rounded-lg border bg-background px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <span className="flex items-center justify-between gap-2 text-xs font-semibold text-foreground">
-            <span>{total ? `${pushed} of ${total} pushed` : 'Inbox only'}</span>
+            <span>{total ? `${pushed} of ${total} sent` : 'Inbox only'}</span>
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
           </span>
           <span className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-slate-200" aria-hidden="true">
@@ -556,10 +563,11 @@ export function AllLeadsPage() {
             {notPushed > 0 && <span className="bg-red-500" style={{ flex: notPushed }} />}
             {pending > 0 && <span className="bg-amber-400" style={{ flex: pending }} />}
           </span>
-          <span className="mt-2 flex items-center justify-between gap-1 text-[11px] font-semibold tabular-nums">
-            <span className="text-emerald-700">● {pushed} green</span>
-            <span className="text-red-700">● {notPushed} red</span>
-            <span className="text-amber-700">● {pending} yellow</span>
+          <span className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-medium tabular-nums">
+            {pushed > 0 && <span className="text-emerald-700">{pushed} sent</span>}
+            {notPushed > 0 && <span className="text-red-700">{notPushed} failed/duplicate</span>}
+            {pending > 0 && <span className="text-amber-700">{pending} pending</span>}
+            {!total && <span className="text-muted-foreground">Not sent to a university</span>}
           </span>
         </button>
       </PopoverTrigger>
@@ -604,12 +612,11 @@ export function AllLeadsPage() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1760px] space-y-5 px-5 py-6 md:px-8">
+    <div className="mx-auto w-full max-w-[1760px] space-y-4 px-4 py-5 md:px-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary"><Inbox className="h-4 w-4" /> Lead workspace</div>
-          <h1 className="text-3xl font-display font-bold tracking-tight text-foreground md:text-4xl">All Leads</h1>
-          <p className="mt-2 max-w-2xl text-base text-muted-foreground">Find the right student by campaign, course, location or delivery status. Repeat enquiries stay together in their history.</p>
+          <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">All Leads</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Search enquiries, review university delivery, and act on selected leads.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {isAdmin && <Button variant="outline" size="sm" onClick={() => setShowAutomation(!showAutomation)} aria-expanded={showAutomation}>
@@ -625,25 +632,22 @@ export function AllLeadsPage() {
         .filter((lead) => lead.isInbound)
         .flatMap((lead) => Object.keys(lead.extraData || {})))].sort()} />}
 
-      <Card className="overflow-hidden rounded-2xl border-primary/20 bg-gradient-to-r from-primary/10 via-background to-background shadow-sm">
-        <div className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center md:p-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Leads in this inbox</p>
-            <div className="mt-2 flex items-end gap-3"><strong className="font-display text-5xl font-bold leading-none tabular-nums text-foreground">{segmentCounts.all}</strong><span className="pb-1 text-sm text-muted-foreground">distinct leads</span></div>
-            <p className="mt-3 text-sm text-muted-foreground">A repeat submission counts once when both email and mobile match.{hasMore ? ' Load older records to include them in this count.' : ''}</p>
-          </div>
-          <div className="rounded-xl border bg-background/80 px-4 py-3 text-sm text-muted-foreground">
-            <Users className="mb-2 h-5 w-5 text-primary" />
-            <p className="font-medium text-foreground">One student, one lead</p>
-            <p>Open a row to review every matching submission and its source.</p>
-          </div>
-        </div>
-      </Card>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Lead overview">
+        {[
+          ['Matching leads', grouped.length, 'text-foreground'],
+          ['Sent to university', viewSummary.sent, 'text-emerald-700'],
+          ['Needs attention', viewSummary.needsAttention, 'text-red-700'],
+          ['Inbox only', viewSummary.inboxOnly, 'text-muted-foreground'],
+        ].map(([label, count, color]) => <Card key={String(label)} className="px-4 py-3 shadow-sm">
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+          <p className={`mt-1 text-2xl font-bold tabular-nums ${color}`}>{count}</p>
+        </Card>)}
+      </div>
 
       <Card className="overflow-hidden shadow-sm">
         <div className="space-y-3 border-b p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div><h2 className="text-lg font-semibold">Lead inbox</h2><p className="text-sm text-muted-foreground">{grouped.length} distinct leads in this view{hasMore ? ' · older records available' : ''}</p></div>
+            <div><h2 className="text-lg font-semibold">Lead list</h2><p className="text-sm text-muted-foreground">{hasMore ? 'Older leads can be loaded below the list.' : 'Open a name or delivery status for details.'}</p></div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} aria-expanded={showFilters}>
                 <Filter className="mr-2 h-4 w-4" /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
@@ -653,20 +657,16 @@ export function AllLeadsPage() {
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 border-b pb-3 sm:grid-cols-3 xl:grid-cols-5" aria-label="Lead groups">
-            {[
-              ['all', 'All leads', segmentCounts.all],
-              ['facebook', 'Meta / Facebook', segmentCounts.facebook],
-              ['google', 'Google', segmentCounts.google],
-              ['other', 'Other sources', segmentCounts.other],
-              ['repeat', 'Repeat enquiries', segmentCounts.repeat],
-            ].map(([value,label,count]) => <button key={value} type="button" aria-pressed={segment === value} onClick={() => setSegment(String(value))}
-              className={`flex min-h-11 items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${segment === value ? 'border-primary bg-primary/10 text-primary' : 'bg-background hover:border-primary/40 hover:bg-muted/40'}`}>
-              <span>{label}</span><span className="rounded-md bg-background px-2 py-0.5 font-semibold tabular-nums text-foreground">{count}</span>
-            </button>)}
+          <div className="flex flex-col gap-2 md:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input aria-label="Search anything in leads" placeholder="Search name, email, mobile, campaign or city" value={search} onChange={(e) => setSearch(e.target.value)} className="h-10 bg-background pl-10" />
           </div>
-          <div className="relative"><Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-            <Input aria-label="Search anything in leads" placeholder="Search anything: name, email, mobile, campaign, city, university or status" value={search} onChange={(e) => setSearch(e.target.value)} className="h-12 rounded-lg border-primary/30 bg-background pl-12 text-base shadow-sm" />
+            <Select value={segment} onValueChange={setSegment}><SelectTrigger aria-label="Lead source group" className="h-10 w-full md:w-56"><SelectValue /></SelectTrigger><SelectContent>
+              <SelectItem value="all">All sources ({segmentCounts.all})</SelectItem>
+              <SelectItem value="facebook">Meta / Facebook ({segmentCounts.facebook})</SelectItem>
+              <SelectItem value="google">Google ({segmentCounts.google})</SelectItem>
+              <SelectItem value="other">Other sources ({segmentCounts.other})</SelectItem>
+              {isAdmin && <SelectItem value="repeat">Repeat enquiries ({segmentCounts.repeat})</SelectItem>}
+            </SelectContent></Select>
           </div>
           <div className="flex flex-wrap gap-1" aria-label="Filter by delivery status">
               {[['all','All'],['Received','Received'],['Failed','Needs attention'],['Pushed','Pushed']].map(([value,label]) =>
