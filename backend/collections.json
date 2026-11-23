@@ -1100,6 +1100,7 @@
     "is_cancelled",
     "is_paused",
     "leads_per_minute",
+    "push_concurrency",
     "processed_count",
     "paused_at",
     "safety_pause_reason",

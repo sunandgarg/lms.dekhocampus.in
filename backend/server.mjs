@@ -468,7 +468,7 @@ export async function start() {
       activateScheduledBatches(db).catch((error) => console.error('Schedule scan failed:', error))
         .finally(() => { scheduleScanBusy = false; });
     }
-    if (activeQueueWorkers >= 2) return;
+    if (activeQueueWorkers >= 5) return;
     activeQueueWorkers++;
     workQueue({ db, s3, bucket: process.env.ARCHIVE_BUCKET })
       .catch((error) => console.error('Lead queue worker failed:', error))

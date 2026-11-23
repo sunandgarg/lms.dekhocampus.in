@@ -57,7 +57,8 @@ export async function claimNext(db) {
       AND EXISTS (SELECT 1 FROM lms_lead_queue waiting WHERE waiting.batch_id = b.id AND waiting.status = 'queued')
       AND (SELECT COUNT(*) FROM lms_lead_queue in_flight
         WHERE in_flight.batch_id = b.id AND in_flight.status = 'processing') <
-        CASE WHEN COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.consecutive_fail_count')) AS UNSIGNED), 0) >= 24 THEN 1 ELSE 2 END
+        CASE WHEN COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.consecutive_fail_count')) AS UNSIGNED), 0) >= 24 THEN 1
+          ELSE LEAST(5, GREATEST(1, COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.push_concurrency')) AS UNSIGNED), 2))) END
       ORDER BY COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.next_send_at_ms')) AS UNSIGNED), 0), b.created_at
       LIMIT 1 FOR UPDATE SKIP LOCKED`, [Date.now()]);
     if (!rows.length) { await connection.rollback(); return null; }

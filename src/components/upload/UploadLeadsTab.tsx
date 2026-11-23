@@ -530,6 +530,9 @@ export function UploadLeadsTab({
   const [batchCounts, setBatchCounts] = useState({ success: 0, failed: 0, duplicates: 0, processed: 0, total: 0 });
   const [partnerMessage, setPartnerMessage] = useState('');
   const [batchRate, setBatchRate] = useState(() => clampUniversityNumber(selectedUniversity?.leads_per_minute, 60, 1, 100));
+  const [batchConcurrency, setBatchConcurrency] = useState(() => clampUniversityNumber(selectedUniversity?.default_push_concurrency, 2, 1, 5));
+  const [hasBatchSnapshot, setHasBatchSnapshot] = useState(false);
+  const [showLeadPreview, setShowLeadPreview] = useState(false);
   const [safetyPauseReason, setSafetyPauseReason] = useState("");
   const [discussionWith, setDiscussionWith] = useState("");
   const [isBackgroundPolling, setIsBackgroundPolling] = useState(Boolean(persistedProcessing.isProcessing && persistedState.batchId));
@@ -684,6 +687,7 @@ export function UploadLeadsTab({
       const duplicates = Number(batch.duplicate_count || 0);
       const processed = success + failed + duplicates;
       setBatchCounts({ success, failed, duplicates, processed, total: Number(batch.total_leads || 0) });
+      setHasBatchSnapshot(true);
 
       const { data: results, error: resultError } = await api.from('leads')
         .select('status,api_response,extra_data').eq('batch_id', pollBatchId)
@@ -1344,6 +1348,7 @@ export function UploadLeadsTab({
     clearAll();
     setSelectedUniversityState(uni || null);
     setBatchRate(clampUniversityNumber(uni?.leads_per_minute, 60, 1, 100));
+    setBatchConcurrency(clampUniversityNumber(uni?.default_push_concurrency, 2, 1, 5));
     persistence.setState({ selectedUniversityId: uni?.id || null });
     setUniversityLoadError(false);
     if (uni) loadUniversityDetails(uni);
@@ -1704,7 +1709,8 @@ export function UploadLeadsTab({
       });
 
       setValidationErrors(errorMap);
-      setShowOnlyInvalid(errorMap.size > 0);
+      setShowOnlyInvalid(false);
+      setShowLeadPreview(false);
 
       if (invalidLeads.length > 0) {
         setAlert({
@@ -1725,6 +1731,7 @@ export function UploadLeadsTab({
       setIsBackgroundPolling(false);
       setBatchStatus('');
       setBatchCounts({ success: 0, failed: 0, duplicates: 0, processed: 0, total: 0 });
+      setHasBatchSnapshot(false);
       setPartnerMessage('');
       setLeadStatuses(new Map());
       setLeadResponses(new Map());
@@ -1872,6 +1879,7 @@ export function UploadLeadsTab({
         source_label: runSourceLabel.trim() || null,
         scheduled_at: scheduledAt?.toISOString() || null,
         leads_per_minute: batchRate,
+        push_concurrency: batchConcurrency,
       })
       .select()
       .single();
@@ -1893,6 +1901,7 @@ export function UploadLeadsTab({
     processingRef.current = true;
     const runId = ++activeRunIdRef.current;
     setIsProcessing(true);
+    setHasBatchSnapshot(false);
     setStartTime(Date.now());
     setAlert({
       type: "info",
@@ -2136,6 +2145,7 @@ export function UploadLeadsTab({
     setLeadPayloads(new Map());
     setValidationErrors(new Map());
     setShowOnlyInvalid(false);
+    setShowLeadPreview(false);
     setDbDuplicates(new Set());
     setProcessedCount(0);
     setBatchId(null);
@@ -2145,6 +2155,7 @@ export function UploadLeadsTab({
     setSafetyPauseReason('');
     setDiscussionWith('');
     setBatchCounts({ success: 0, failed: 0, duplicates: 0, processed: 0, total: 0 });
+    setHasBatchSnapshot(false);
     setPartnerMessage('');
     setStartTime(null);
     currentIndexRef.current = 0;
@@ -2178,12 +2189,11 @@ export function UploadLeadsTab({
     }
   };
 
-  const rawFailedCount = Math.max([...leadStatuses.values()].filter((s) => s === "failed").length, batchCounts.failed);
-  const duplicateCount = Math.max([...leadStatuses.values()].filter((s) => s === "duplicate").length, batchCounts.duplicates);
-  const successCount = Math.max([...leadStatuses.values()].filter((s) => s === "success").length, batchCounts.success);
-  const failedCount = rawFailedCount + duplicateCount;
-  const processedDisplayCount = Math.max(successCount + failedCount, processedCount, batchCounts.processed);
-  const totalDisplayCount = leads.length || batchCounts.total;
+  const successCount = batchId && hasBatchSnapshot ? batchCounts.success : 0;
+  const failedCount = batchId && hasBatchSnapshot ? batchCounts.failed : 0;
+  const duplicateCount = batchId && hasBatchSnapshot ? batchCounts.duplicates : 0;
+  const processedDisplayCount = successCount + failedCount + duplicateCount;
+  const totalDisplayCount = batchId && hasBatchSnapshot ? batchCounts.total : leads.length;
   const pendingCount = Math.max(totalDisplayCount - processedDisplayCount, 0);
 
   const getEstimatedTime = () => {
@@ -2536,12 +2546,7 @@ export function UploadLeadsTab({
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-medium text-foreground">Lead Preview ({leads.length} records)</h3>
-                  {hasValidationErrors && (
-                    <p className="text-xs text-warning flex items-center gap-1 mt-1">
-                      <AlertTriangle className="h-3 w-3" />
-                      {validationErrors.size} row(s) have warnings. Process sends every row; the university may reject invalid data.
-                    </p>
-                  )}
+                  {!showLeadPreview && <p className="mt-1 text-xs text-muted-foreground">Open the preview to review mapped rows before pushing.</p>}
                   {dbDuplicates.size > 0 && (
                     <p className="text-xs text-warning flex items-center gap-1 mt-1">
                       <AlertTriangle className="h-3 w-3" />
@@ -2550,12 +2555,14 @@ export function UploadLeadsTab({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {hasValidationErrors && (
-                    <button type="button" onClick={() => setShowOnlyInvalid((value) => !value)}
-                      className="rounded-md border border-warning/50 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/10">
-                      {showOnlyInvalid ? 'Show all rows' : `Show ${validationErrors.size} rows with errors`}
-                    </button>
-                  )}
+                  <button type="button" onClick={() => { setShowLeadPreview((value) => !value); setShowOnlyInvalid(false); }}
+                    className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted">
+                    {showLeadPreview ? 'Hide preview' : 'View preview'}
+                  </button>
+                  {hasValidationErrors && <button type="button" onClick={() => { setShowLeadPreview(true); setShowOnlyInvalid((value) => showLeadPreview ? !value : true); }}
+                    className="rounded-md border border-warning/50 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/10">
+                    <AlertTriangle className="mr-1 inline h-3 w-3" />{showLeadPreview && showOnlyInvalid ? 'Show all rows' : `Check ${validationErrors.size} warnings`}
+                  </button>}
                   {failedCount > 0 && !isProcessing && (
                     <button
                       onClick={exportFailedLeads}
@@ -2574,6 +2581,11 @@ export function UploadLeadsTab({
                   </button>
                 </div>
               </div>
+
+              {showLeadPreview && <>
+              {hasValidationErrors && (
+                <p className="mb-4 text-xs text-warning">Process sends every row; the university may reject rows with missing or invalid data.</p>
+              )}
 
               {processedDisplayCount === 0 && (
                 <div className="flex items-center gap-4 mb-4 p-3 bg-muted/50 rounded-lg">
@@ -2705,6 +2717,7 @@ export function UploadLeadsTab({
                   </div>
                 </div>}
               </div>
+              </>}
             </div>
           )}
         </div>
@@ -2719,7 +2732,7 @@ export function UploadLeadsTab({
             <div className="card-elevated p-6">
               <h3 className="font-medium text-foreground mb-4">Processing Status</h3>
               {selectedUniversity && <p className="mb-2 break-all text-sm text-muted-foreground">Destination: <span className="font-medium text-foreground">{selectedUniversity.name}</span>{selectedUniversity.api_url && <> · {selectedUniversity.api_url}</>}</p>}
-              {batchId && <p className="mb-4 text-sm text-muted-foreground">Server status: <span className="font-medium capitalize text-foreground">{batchStatus || 'checking'}</span></p>}
+              {batchId && <p className="mb-4 text-sm text-muted-foreground">Batch status: <span className="font-medium capitalize text-foreground">{hasBatchSnapshot ? batchStatus || 'checking' : 'checking recorded results'}</span></p>}
               {partnerMessage && <p role="status" className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">Partner response: {isAdmin ? partnerMessage : maskContactText(partnerMessage)}</p>}
               {!isProcessing && leads.length > 0 && <label className="mb-4 block rounded-lg border bg-muted/20 p-3 text-sm font-medium text-foreground">
                 Leads per minute for this run
@@ -2749,7 +2762,7 @@ export function UploadLeadsTab({
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-3 mb-6">
+              <div className="grid grid-cols-2 gap-3 mb-6 xl:grid-cols-4">
                 <div className="text-center p-2 rounded-lg bg-success/10">
                   <p className="font-display text-xl font-bold text-success">{successCount}</p>
                   <p className="text-xs text-muted-foreground">Success</p>
@@ -2758,9 +2771,13 @@ export function UploadLeadsTab({
                   <p className="font-display text-xl font-bold text-destructive">{failedCount}</p>
                   <p className="text-xs text-muted-foreground">Failed</p>
                 </div>
+                <div className="text-center p-2 rounded-lg bg-warning/10">
+                  <p className="font-display text-xl font-bold text-warning">{duplicateCount}</p>
+                  <p className="text-xs text-muted-foreground">Duplicate</p>
+                </div>
                 <div className="text-center p-2 rounded-lg bg-muted">
                   <p className="font-display text-xl font-bold text-muted-foreground">{pendingCount}</p>
-                  <p className="text-xs text-muted-foreground">Pending</p>
+                  <p className="text-xs text-muted-foreground">Remaining incl. in flight</p>
                 </div>
               </div>
 
@@ -2861,7 +2878,14 @@ export function UploadLeadsTab({
               <p className="text-sm text-muted-foreground mt-1">
                 Match CSV columns to lead fields. Every mapped value is captured; only fields configured in this university’s API integration are sent. Each field can only be used once.
               </p>
-              <p className="mt-3 text-xs text-muted-foreground">The server sends one lead at a time at the rate selected for this run.</p>
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 p-3">
+                <label htmlFor="batch-concurrency" className="text-sm font-medium text-foreground">Leads in one go</label>
+                <select id="batch-concurrency" value={batchConcurrency} onChange={(event) => setBatchConcurrency(Number(event.target.value))}
+                  className="input-field w-20 text-sm">
+                  {[1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}
+                </select>
+                <span className="text-xs text-muted-foreground">Maximum simultaneous university requests for this batch; the leads per minute limit still applies.</span>
+              </div>
             </div>
 
             <div className="p-6 space-y-4">

@@ -71,3 +71,14 @@ test('queue claim reserves the next send according to the batch rate', async () 
   assert.ok(saved.next_send_at_ms >= before + 2000);
   assert.ok(saved.next_send_at_ms <= Date.now() + 2000);
 });
+
+test('queue claim respects the selected 1–5 simultaneous requests and serializes near the safety pause', async () => {
+  const connection = { beginTransaction: async () => {}, rollback: async () => {}, release: () => {},
+    query: async (sql) => {
+      assert.match(sql, /push_concurrency/);
+      assert.match(sql, /LEAST\(5, GREATEST\(1/);
+      assert.match(sql, /consecutive_fail_count.*>= 24 THEN 1/s);
+      return [[]];
+    } };
+  assert.equal(await claimNext({ getConnection: async () => connection }), null);
+});
