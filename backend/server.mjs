@@ -15,6 +15,7 @@ import { processQueue, serverIp, verifyDomain } from './misc-functions.mjs';
 import { canUpload, isAdmin, requireOwnedBatch, userRecords } from './access.mjs';
 import { hideLeads } from './lead-visibility.mjs';
 import { batchReport } from './report.mjs';
+import { universityDeliveryReport } from './university-delivery-report.mjs';
 import { maskContactData } from './mask-contact.mjs';
 import { testApi, testCustomIntegration } from './test-integrations.mjs';
 import { exportData, importData } from './db-transfer.mjs';
@@ -201,6 +202,10 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
       const user = await sessionUser(db, request);
       if (!user || !user.is_approved) return send(response, 401, { error: 'Sign in required' });
       if (url.pathname === '/api/auth/me' && method === 'GET') return send(response, 200, { user: clientUser(user) });
+
+      if (url.pathname === '/api/functions/university-delivery-report' && method === 'POST') {
+        return send(response, 200, await universityDeliveryReport(db, await readJson(request)));
+      }
 
       if (url.pathname === '/api/functions/all-leads-excluded-batches' && method === 'POST') {
         await readJson(request);

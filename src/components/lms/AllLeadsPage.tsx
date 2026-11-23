@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -115,6 +115,25 @@ function leadDay(lead: LmsLead) {
   return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
+function indiaDateOffset(days = 0) {
+  const date = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value || '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+interface UniversityReportRow {
+  university: string;
+  university_id: string | null;
+  total: number;
+  success: number;
+  duplicate: number;
+  failed: number;
+  pending: number;
+}
+
 function downloadCSV(data: LmsLead[], filename: string, masked = false) {
   const headers = [
     "Lead ID",
@@ -206,6 +225,15 @@ export function AllLeadsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showAutomation, setShowAutomation] = useState(false);
+  const [reportPeriod, setReportPeriod] = useState('today');
+  const [reportFrom, setReportFrom] = useState(() => indiaDateOffset());
+  const [reportTo, setReportTo] = useState(() => indiaDateOffset());
+  const [reportRows, setReportRows] = useState<UniversityReportRow[]>([]);
+  const [reportLoading, setReportLoading] = useState(true);
+  const [reportError, setReportError] = useState('');
+  const [showReportFilters, setShowReportFilters] = useState(false);
+  const [reportUniversity, setReportUniversity] = useState('all');
+  const reportRequestRef = useRef(0);
 
   const fetchLeads = useCallback(
     async (_forceRefresh = false) => {
@@ -315,6 +343,43 @@ export function AllLeadsPage() {
   useEffect(() => {
     fetchLeads();
   }, [fetchLeads]);
+
+  const fetchReport = useCallback(async () => {
+    const requestId = ++reportRequestRef.current;
+    if (!reportFrom || !reportTo || reportFrom > reportTo) {
+      setReportError('Choose a valid start and end date.');
+      setReportRows([]);
+      setReportLoading(false);
+      return;
+    }
+    setReportLoading(true);
+    setReportError('');
+    const { data, error } = await api.functions.invoke('university-delivery-report', {
+      body: { from: reportFrom, to: reportTo },
+    });
+    if (requestId !== reportRequestRef.current) return;
+    if (error) {
+      setReportError(error.message || 'Could not load the report.');
+      setReportRows([]);
+    } else setReportRows(data.rows || []);
+    setReportLoading(false);
+  }, [reportFrom, reportTo]);
+
+  useEffect(() => { fetchReport(); }, [fetchReport]);
+
+  const selectReportPeriod = (period: string) => {
+    setReportPeriod(period);
+    if (period === 'custom') return;
+    const fromOffset = { today: 0, yesterday: -1, last7: -6, last30: -29 }[period] ?? 0;
+    setReportFrom(indiaDateOffset(fromOffset));
+    setReportTo(indiaDateOffset(period === 'yesterday' ? -1 : 0));
+  };
+
+  const visibleReportRows = reportRows.filter((row) => reportUniversity === 'all' || row.university_id === reportUniversity);
+  const reportTotals = visibleReportRows.reduce((total, row) => ({
+    success: total.success + row.success, duplicate: total.duplicate + row.duplicate,
+    failed: total.failed + row.failed, pending: total.pending + row.pending,
+  }), { success: 0, duplicate: 0, failed: 0, pending: 0 });
 
   const repeatKeys = useMemo(() => {
     const counts = new Map<string, number>();
@@ -643,6 +708,71 @@ export function AllLeadsPage() {
           <p className={`mt-1 text-2xl font-bold tabular-nums ${color}`}>{count}</p>
         </Card>)}
       </div>
+
+      <Card className="overflow-hidden shadow-sm" aria-label="University delivery report">
+        <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">University delivery report</h2>
+            <p className="text-sm text-muted-foreground">Partner results by delivery date (India time). This report covers all stored deliveries, independent of the lead list filters.</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={fetchReport} disabled={reportLoading} aria-label="Refresh university delivery report">
+            <RefreshCw className={`mr-2 h-4 w-4 ${reportLoading ? 'animate-spin' : ''}`} /> Refresh report
+          </Button>
+        </div>
+        <div className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center gap-2" aria-label="Report date range">
+            {[
+              ['today', 'Today'], ['yesterday', 'Yesterday'], ['last7', 'Last 7 days'],
+              ['last30', 'Last 30 days'], ['custom', 'Custom dates'],
+            ].map(([value, label]) => <Button key={value} type="button" size="sm"
+              variant={reportPeriod === value ? 'default' : 'outline'} onClick={() => selectReportPeriod(value)}>{label}</Button>)}
+          </div>
+          {reportPeriod === 'custom' && <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3">
+            <label className="text-sm font-medium">From <Input type="date" aria-label="Report from date" value={reportFrom} max={reportTo || undefined}
+              onChange={(event) => setReportFrom(event.target.value)} className="mt-1 w-44 bg-background" /></label>
+            <label className="text-sm font-medium">To <Input type="date" aria-label="Report to date" value={reportTo} min={reportFrom || undefined}
+              onChange={(event) => setReportTo(event.target.value)} className="mt-1 w-44 bg-background" /></label>
+          </div>}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">{reportFrom} to {reportTo} · Counts show actual partner delivery records.</p>
+            <Button type="button" variant="ghost" size="sm" aria-expanded={showReportFilters} onClick={() => setShowReportFilters(!showReportFilters)}>
+              <Filter className="mr-2 h-4 w-4" /> Report filters {showReportFilters ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
+            </Button>
+          </div>
+          {showReportFilters && <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3">
+            <label className="text-sm font-medium" htmlFor="report-university">University</label>
+            <Select value={reportUniversity} onValueChange={setReportUniversity}><SelectTrigger id="report-university" className="w-64 bg-background"><SelectValue /></SelectTrigger><SelectContent>
+              <SelectItem value="all">All universities</SelectItem>
+              {reportRows.filter((row) => row.university_id).map((row) => <SelectItem key={row.university_id} value={row.university_id!}>{row.university}</SelectItem>)}
+            </SelectContent></Select>
+          </div>}
+          {reportError && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{reportError}</p>}
+          <div className="overflow-x-auto rounded-lg border">
+            <Table>
+              <TableHeader><TableRow><TableHead>University</TableHead><TableHead className="text-right">Success</TableHead><TableHead className="text-right">Duplicate</TableHead><TableHead className="text-right">Failed</TableHead><TableHead className="text-right">Pending</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {reportLoading ? <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Loading report…</TableCell></TableRow>
+                  : visibleReportRows.length === 0 ? <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No university deliveries in this date range.</TableCell></TableRow>
+                  : visibleReportRows.map((row) => <TableRow key={row.university_id || row.university}>
+                    <TableCell className="font-medium">{row.university}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums text-emerald-700">{row.success}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums text-amber-700">{row.duplicate}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums text-red-700">{row.failed}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">{row.pending}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">{row.total}</TableCell>
+                  </TableRow>)}
+                {!reportLoading && visibleReportRows.length > 0 && <TableRow className="bg-muted/30 font-semibold">
+                  <TableCell>Total</TableCell><TableCell className="text-right tabular-nums text-emerald-700">{reportTotals.success}</TableCell>
+                  <TableCell className="text-right tabular-nums text-amber-700">{reportTotals.duplicate}</TableCell>
+                  <TableCell className="text-right tabular-nums text-red-700">{reportTotals.failed}</TableCell>
+                  <TableCell className="text-right tabular-nums">{reportTotals.pending}</TableCell>
+                  <TableCell className="text-right tabular-nums">{reportTotals.success + reportTotals.duplicate + reportTotals.failed + reportTotals.pending}</TableCell>
+                </TableRow>}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </Card>
 
       <Card className="overflow-hidden shadow-sm">
         <div className="space-y-3 border-b p-4">
