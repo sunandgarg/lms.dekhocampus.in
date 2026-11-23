@@ -33,6 +33,7 @@ interface LeadPreviewTableProps {
   rowOffset?: number;
   rowIndices?: number[];
   maskContacts?: boolean;
+  showOutgoingRequest?: boolean;
   requiredFields?: Array<{ key: string; label: string }>;
 }
 
@@ -51,6 +52,7 @@ export function LeadPreviewTable({
   rowOffset = 0,
   rowIndices,
   maskContacts = false,
+  showOutgoingRequest = true,
   requiredFields = [],
 }: LeadPreviewTableProps) {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -163,7 +165,7 @@ export function LeadPreviewTable({
           {JSON.stringify(maskContacts ? maskContactData(mapped) : mapped, null, 2)}
         </pre>
       </div>
-      <div>
+      {showOutgoingRequest && <div>
         <p className="font-medium text-foreground mb-1 text-xs">Outgoing university API request</p>
         <pre className="bg-background p-3 rounded-lg overflow-x-auto font-mono text-xs text-foreground whitespace-pre-wrap">
           {formatResponse(leadPayloads.get(index) || "")}
@@ -171,7 +173,7 @@ export function LeadPreviewTable({
         <p className="mt-1 text-xs text-muted-foreground">
           Only fields configured in this university’s API integration are sent. Other mapped fields stay in the lead and its archived CSV.
         </p>
-      </div>
+      </div>}
     </div>
     );
   };
@@ -267,7 +269,7 @@ export function LeadPreviewTable({
             {(showStatus || hasValidationErrors || hasDbDuplicates) && (
               <th className="px-3 py-2 text-center font-medium text-muted-foreground">Status</th>
             )}
-            {showPayloadCol && <th className="px-3 py-2 text-left font-medium text-muted-foreground">Request JSON</th>}
+            {showPayloadCol && <th className="px-3 py-2 text-left font-medium text-muted-foreground">{showOutgoingRequest ? 'Request JSON' : 'Mapped fields'}</th>}
             {showStatus && <th className="px-3 py-2 text-left font-medium text-muted-foreground">Response JSON</th>}
             {(showStatus || isEditable) && (
               <th className="px-3 py-2 text-center font-medium text-muted-foreground">Action</th>
@@ -408,7 +410,7 @@ export function LeadPreviewTable({
                           className="flex items-center gap-1 text-xs text-primary hover:underline"
                         >
                           <Eye className="h-3 w-3" />
-                          View JSON
+                          {showOutgoingRequest ? 'View JSON' : 'View mapped fields'}
                         </button>
                       ) : (
                         <span className="text-xs text-muted-foreground">-</span>

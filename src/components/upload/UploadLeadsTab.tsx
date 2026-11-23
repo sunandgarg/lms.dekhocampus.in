@@ -14,6 +14,7 @@ import {
   Search,
   FileDown,
   CalendarClock,
+  RotateCcw,
 } from "lucide-react";
 import { parseCSV, generateSampleCSV } from "@/utils/csvParser";
 import {
@@ -2159,8 +2160,11 @@ export function UploadLeadsTab({
   };
 
   const resetWorkspace = () => {
+    if (isProcessing && !isBackgroundPolling) return;
+    const hadBatch = Boolean(batchId);
     clearAll();
     onClearFile?.();
+    if (hadBatch) setAlert({ type: 'info', message: 'This tab was reset. The batch remains in Queue Monitor and Upload History.' });
   };
 
   const handlePageSizeChange = (size: number | "custom") => {
@@ -2369,6 +2373,10 @@ export function UploadLeadsTab({
           <p className="text-muted-foreground">Select a university and upload student leads via CSV</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <button type="button" onClick={resetWorkspace} disabled={isProcessing && !isBackgroundPolling}
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-destructive/40 px-3 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50">
+            <RotateCcw className="h-4 w-4" /> Reset page
+          </button>
           {selectedUniversity?.sample_csv_content && (
             <button
               onClick={() => {
@@ -2605,7 +2613,7 @@ export function UploadLeadsTab({
                 </div>
               )}
 
-              {(selectedUniversity.api_type || "") === "upgrad" && leadPayloads.has(0) && (
+              {isAdmin && (selectedUniversity.api_type || "") === "upgrad" && leadPayloads.has(0) && (
                 <div className="mb-4 rounded-lg border border-border bg-background p-4">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-sm font-medium text-foreground">upGrad Request JSON</p>
@@ -2632,6 +2640,7 @@ export function UploadLeadsTab({
                 onUpdateLead={!isProcessing ? handleUpdateLead : undefined}
                 isEditable={!isProcessing && processedDisplayCount === 0}
                 maskContacts={!isAdmin}
+                showOutgoingRequest={isAdmin}
                 requiredFields={(selectedUniversity?.customColumns || [])
                   .filter((column) => column.isRequired && !['name', 'email', 'mobile', 'state', 'city', 'course'].includes(column.columnKey))
                   .map((column) => ({ key: column.columnKey, label: column.columnName }))}
@@ -2641,10 +2650,8 @@ export function UploadLeadsTab({
               {processedDisplayCount === 0 && !isProcessing && (
                 <div className="mt-4 grid gap-3 rounded-lg border border-border bg-muted/30 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
                   <div>
-                    <p className="text-sm font-medium text-foreground">Review the Request JSON, then push leads.</p>
-                    <p className="text-xs text-muted-foreground">
-                      The preview now matches the exact upGrad nested payload sent to the API.
-                    </p>
+                    <p className="text-sm font-medium text-foreground">{isAdmin ? 'Review the Request JSON, then push leads.' : 'Review the mapped leads, then push.'}</p>
+                    {isAdmin && <p className="text-xs text-muted-foreground">The preview matches the exact upGrad nested payload sent to the API.</p>}
                   </div>
                   <button
                     onClick={processLeads}
