@@ -8,7 +8,7 @@ const db = await mysql.createConnection({
 });
 try {
   await db.beginTransaction();
-  const { data: existing } = await executeRecords(db, { table: 'universities', select: 'id,name',
+  const { data: existing } = await executeRecords(db, { table: 'universities', select: 'id,name,default_values',
     filters: [{ field: 'name', op: 'eq', value: 'GLA ONLINE' }], single: true });
   let universityId = existing?.id;
   if (!universityId) {
@@ -17,11 +17,15 @@ try {
         name: 'GLA ONLINE', status: 'live', api_type: 'glaonline', api_url: GLA_ONLINE_ENDPOINT,
         source: 'dekho_campus', medium: 'dekhocampus', campaign: 'API',
         auth_type: 'none', secret_key: '', college_id: '', custom_headers: {},
-        column_mapping: {}, default_values: {}, payload_wrapper: 'object',
+        column_mapping: {}, default_values: { dob: '01/01/1990' }, payload_wrapper: 'object',
         leads_per_minute: 30, default_push_concurrency: 1, api_timeout_seconds: 30,
         sample_csv_content: 'name,email,mobile,dob,course,specialization,glaCityCode,program_code\n',
       } });
     universityId = university.id;
+  } else {
+    await executeRecords(db, { table: 'universities', action: 'update',
+      filters: [{ field: 'id', op: 'eq', value: universityId }],
+      values: { default_values: { ...(existing.default_values || {}), dob: '01/01/1990' } } });
   }
   for (const name of ['MBA', 'MCA']) {
     const { data } = await executeRecords(db, { table: 'programs', select: 'id',
