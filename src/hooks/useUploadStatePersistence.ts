@@ -16,6 +16,7 @@ import type { Lead } from "@/utils/leadValidation";
 // ============= Storage Keys =============
 const STORAGE_KEY = "dekhocampus_upload_v3";
 const PROCESSING_STATE_KEY = "dekhocampus_upload_processing_v1";
+const TAB_ID_KEY = "dekhocampus_upload_tab_id";
 
 // ============= Types =============
 export interface ProcessingState {
@@ -401,6 +402,29 @@ export function useUploadStatePersistence(
   const [state, setStateInternal] = useState<UploadState>(initialData.state);
   const [processing, setProcessingInternal] = useState<ProcessingState>(initialData.processing);
   const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    let tabId = sessionStorage.getItem(TAB_ID_KEY);
+    if (!tabId) {
+      tabId = crypto.randomUUID();
+      sessionStorage.setItem(TAB_ID_KEY, tabId);
+    }
+    const birth = Date.now() + Math.random();
+    const channel = new BroadcastChannel('dekhocampus_upload_tabs');
+    channel.onmessage = ({ data }) => {
+      if (data?.tabId !== tabId) return;
+      if (data.type === 'hello') channel.postMessage({ type: 'here', tabId, birth });
+      if ((data.type === 'hello' || data.type === 'here') && data.birth < birth) {
+        channel.close();
+        clearStorage();
+        sessionStorage.setItem(TAB_ID_KEY, crypto.randomUUID());
+        window.location.reload();
+      }
+    };
+    channel.postMessage({ type: 'hello', tabId, birth });
+    return () => channel.close();
+  }, []);
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef(state);
