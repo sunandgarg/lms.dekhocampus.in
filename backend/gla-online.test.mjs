@@ -23,6 +23,13 @@ test('GLA Online refuses unknown programs and embedded sample-lead parameters', 
   assert.throws(() => glaOnlineRequest(`${GLA_ONLINE_ENDPOINT}?Name=Test`, {}), /without test-lead/);
 });
 
+test('GLA Online uses 1 January 1990 only when DOB is missing', () => {
+  const lead = { name: 'Test', email: 'test@example.com', mobile: '9899158166',
+    course: 'MBA', specialization: 'Human Resource Management' };
+  assert.equal(glaOnlinePayload(lead).DOB, '01/01/1990');
+  assert.equal(glaOnlinePayload({ ...lead, dob: '2001-02-03' }).DOB, '03/02/2001');
+});
+
 test('GLA Online duplicate response is not counted as success', () => {
   assert.equal(categorizeResponse(200, '"Email Id or Mobile No already registered, please check and try again"', true), 'Duplicate');
 });

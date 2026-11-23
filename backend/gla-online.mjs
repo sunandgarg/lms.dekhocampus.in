@@ -39,7 +39,7 @@ export function glaOnlinePayload(lead, source = 'dekho_campus') {
   const cityCode = String(lead.glaCityCode || lead.cityCode || (/^\d+$/.test(String(lead.City || '')) ? lead.City : '') || '0').trim();
   if (!/^\d+$/.test(cityCode)) throw Object.assign(new Error('GLA Online City must be a numeric code'), { status: 400 });
   return {
-    Name: required(lead.name || lead.Name, 'Name'), DOB: dateOfBirth(lead.dob || lead.DOB),
+    Name: required(lead.name || lead.Name, 'Name'), DOB: dateOfBirth(lead.dob || lead.DOB || '01/01/1990'),
     EmailId: email, Mobile: mobile, ProgramCode: programCode(lead),
     source: String(source || 'dekho_campus').trim(), City: cityCode,
   };
