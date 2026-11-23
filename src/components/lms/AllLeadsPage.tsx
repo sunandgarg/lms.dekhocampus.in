@@ -261,6 +261,8 @@ export function AllLeadsPage() {
         }
 
         const leadsData: any[] = [];
+        const { data: universityRows } = await api.from('universities').select('id,name').range(0, 999);
+        const universityNames = new Map((universityRows || []).map((row: any) => [row.id, row.name]));
         let existingHasMore = false;
         for (let page = 0; page < pageCount; page++) {
           let query = api.from('leads').select('*, universities(name)')
@@ -286,7 +288,7 @@ export function AllLeadsPage() {
           source: l.lead_source || "Manual",
           medium: l.lead_medium || '',
           campaign: l.lead_campaign || "",
-          university: l.universities?.name || "Unknown",
+          university: universityNames.get(l.university_id) || l.universities?.name || "Unknown",
           universityId: l.university_id,
           status: mapStatus(l.status),
           failReason: l.status === "Fail" || l.status === "failed" ? l.api_response || "Unknown error" : "",
@@ -297,7 +299,7 @@ export function AllLeadsPage() {
           triggerSource: l.lead_source || "Unknown",
           deliveries: [{ id: l.batch_id || l.id, status: l.status, success_count: l.status === 'Success' ? 1 : 0,
             duplicate_count: l.status === 'Duplicate' ? 1 : 0, fail_count: ['Fail', 'failed'].includes(l.status) ? 1 : 0,
-            universities: { name: l.universities?.name || 'University' } }],
+            universities: { name: universityNames.get(l.university_id) || l.universities?.name || 'Unknown destination' } }],
         }));
 
         const incoming: LmsLead[] = (inboundData || []).map((lead: any) => ({
@@ -448,7 +450,7 @@ export function AllLeadsPage() {
   const toggleAll = () => {
     setSelectedIds((current) => {
       const next = new Set(current);
-      if (visibleRows.every((lead) => next.has(lead.id))) visibleRows.forEach((lead) => next.delete(lead.id));
+      if (visibleRows.every((lead) => next.has(lead.id))) return new Set();
       else visibleRows.forEach((lead) => next.add(lead.id));
       return next;
     });
@@ -459,6 +461,8 @@ export function AllLeadsPage() {
     setRetryDiscovering(true);
     try {
       const { directIds, batchIds } = retrySources(selected, onlyBatchId);
+      const { data: universityRows } = await api.from('universities').select('id,name').range(0, 999);
+      const universityNames = new Map((universityRows || []).map((row: any) => [row.id, row.name]));
       const candidates = new Map<string, RetryCandidate>();
       for (const [field, ids] of [['id', directIds], ['batch_id', batchIds]] as const) {
         for (let start = 0; start < ids.length; start += 250) {
@@ -471,7 +475,7 @@ export function AllLeadsPage() {
             for (const row of data || []) {
               if (Number(row.retry_count || 0) >= 3) continue;
               candidates.set(row.id, { id: row.id, universityId: row.university_id,
-                universityName: row.universities?.name || 'University' });
+                universityName: universityNames.get(row.university_id) || row.universities?.name || 'Unknown destination' });
             }
             if ((data || []).length < 1000) break;
           }
