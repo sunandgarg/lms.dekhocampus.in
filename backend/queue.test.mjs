@@ -58,10 +58,14 @@ test('sealed future batches stay scheduled until the server activates them', asy
 
 test('queue claim reserves the next send according to the batch rate', async () => {
   const batch = { status: 'processing', leads_per_minute: 30 };
-  const item = { batch_id: 'batch-1', lead_index: 0, task: {}, batch };
+  const item = { batch_id: 'batch-1', batch };
   let saved;
   const connection = { beginTransaction: async () => {}, commit: async () => {}, rollback: async () => {}, release: () => {},
-    query: async () => [[item]], execute: async (sql, params) => { if (sql.startsWith('UPDATE lms_records')) saved = JSON.parse(params[0]); return [[]]; } };
+    query: async () => [[item]], execute: async (sql, params) => {
+      if (sql.startsWith('SELECT lead_index')) return [[{ lead_index: 0, task: {} }]];
+      if (sql.startsWith('UPDATE lms_records')) saved = JSON.parse(params[0]);
+      return [[]];
+    } };
   const before = Date.now();
   await claimNext({ getConnection: async () => connection });
   assert.ok(saved.next_send_at_ms >= before + 2000);

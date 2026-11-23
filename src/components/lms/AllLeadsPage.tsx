@@ -812,7 +812,7 @@ export function AllLeadsPage() {
                   <div className="overflow-hidden rounded-xl border">{deliveryList(detailLead.deliveries)}</div>
                   <dl className="grid grid-cols-2 gap-3">{[
                     ['Destination',detailLead.university],['Status',detailLead.status],['Retry count',detailLead.retryCount],
-                  ].map(([label,value]) => detailField(detailLead,label,value))}</dl>
+                  ].map(([label,value]) => detailField(detailLead,String(label),value))}</dl>
                 {detailLead.failReason && (
                   <div className="p-3 bg-destructive/10 rounded-lg text-sm text-destructive">
                     <strong>API Response:</strong>

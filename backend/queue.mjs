@@ -49,17 +49,22 @@ export async function claimNext(db) {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    const [rows] = await connection.query(`SELECT q.batch_id, q.lead_index, q.task, b.data AS batch
-      FROM lms_lead_queue q JOIN lms_records b ON b.collection = 'upload_batches' AND b.id = q.batch_id
-      WHERE q.status = 'queued' AND JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.status')) = 'processing'
+    const [rows] = await connection.query(`SELECT b.id AS batch_id, b.data AS batch
+      FROM lms_records b
+      WHERE b.collection = 'upload_batches' AND b.record_status = 'processing'
       AND JSON_EXTRACT(b.data, '$.is_paused') != true AND JSON_EXTRACT(b.data, '$.is_cancelled') != true
       AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.next_send_at_ms')) AS UNSIGNED), 0) <= ?
+      AND EXISTS (SELECT 1 FROM lms_lead_queue waiting WHERE waiting.batch_id = b.id AND waiting.status = 'queued')
       AND (SELECT COUNT(*) FROM lms_lead_queue in_flight
-        WHERE in_flight.batch_id = q.batch_id AND in_flight.status = 'processing') <
+        WHERE in_flight.batch_id = b.id AND in_flight.status = 'processing') <
         CASE WHEN COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.consecutive_fail_count')) AS UNSIGNED), 0) >= 24 THEN 1 ELSE 2 END
-      ORDER BY q.created_at, q.lead_index LIMIT 1 FOR UPDATE SKIP LOCKED`, [Date.now()]);
+      ORDER BY COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.next_send_at_ms')) AS UNSIGNED), 0), b.created_at
+      LIMIT 1 FOR UPDATE SKIP LOCKED`, [Date.now()]);
     if (!rows.length) { await connection.rollback(); return null; }
-    const item = rows[0];
+    const [queued] = await connection.execute(`SELECT lead_index, task FROM lms_lead_queue
+      WHERE batch_id = ? AND status = 'queued' ORDER BY lead_index LIMIT 1 FOR UPDATE`, [rows[0].batch_id]);
+    if (!queued.length) { await connection.rollback(); return null; }
+    const item = { ...rows[0], ...queued[0] };
     const batch = item.batch;
     const rate = Math.min(100, Math.max(1, Number(batch.leads_per_minute) || 60));
     batch.next_send_at_ms = Date.now() + Math.ceil(60_000 / rate);

@@ -82,6 +82,19 @@ function normalizePartnerResponse(value: unknown): string {
   }
 }
 
+async function postQueuedUpload(url: string, options: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (![429, 502, 503, 504].includes(response.status) || attempt === 9) return response;
+    } catch (error) {
+      if (attempt === 9) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(2000 * 2 ** attempt, 8000)));
+  }
+  throw new Error('Upload retry limit reached');
+}
+
 // This is the final UI boundary for asynchronous partner results. Do not rely
 // on TypeScript here: Edge Function JSON is untrusted at runtime and a partner
 // may return an object (CTPL has returned contact_name objects). React must
@@ -1345,6 +1358,10 @@ export function UploadLeadsTab({
   const handleFileUploadEvent = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedUniversity?.detailsLoaded) return;
+    if (file.size > 20 * 1024 * 1024) {
+      setAlert({ type: 'error', message: 'CSV files over 20 MB must be split into smaller batches before uploading.' });
+      return;
+    }
 
     setFileName(file.name);
 
@@ -1893,14 +1910,15 @@ export function UploadLeadsTab({
       setBatchId(newBatchId);
 
       if (csvData) {
-        const originalResponse = await fetch(`/api/batches/${newBatchId}/source`, {
+        const originalResponse = await postQueuedUpload(`/api/batches/${newBatchId}/source`, {
           method: 'POST', headers: { 'Content-Type': 'text/csv',
             'X-Filename': `original-${fileName || 'upload.csv'}`.replace(/[^\x20-\x7e]/g, '_') }, body: csvData,
         });
         if (!originalResponse.ok) throw new Error('Could not archive the original file. No leads were sent.');
       }
       const sourceCsv = generateLeadsCSV(leads);
-      const sourceResponse = await fetch(`/api/batches/${newBatchId}/source`, {
+      if (new Blob([sourceCsv]).size > 20 * 1024 * 1024) throw new Error('Mapped CSV exceeds 20 MB. Split this upload into smaller batches.');
+      const sourceResponse = await postQueuedUpload(`/api/batches/${newBatchId}/source`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/csv', 'X-Filename': 'processed-leads.csv' },
         body: sourceCsv,
@@ -1925,7 +1943,7 @@ export function UploadLeadsTab({
             leadCampaign: lead.leadCampaign || selectedUniversity.campaign,
           },
         }));
-        const queued = await fetch(`/api/batches/${newBatchId}/queue`, {
+        const queued = await postQueuedUpload(`/api/batches/${newBatchId}/queue`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tasks }),
         });

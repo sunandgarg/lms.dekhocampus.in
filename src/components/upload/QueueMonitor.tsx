@@ -65,21 +65,22 @@ function QueueMonitorInner() {
           return;
         }
 
-        let query = api
-          .from("upload_batches")
-          .select(
-            "id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, user_id, error_message, safety_pause_reason",
-          )
-          .order("created_at", { ascending: false })
-          .limit(50);
+        const fields = "id, university_id, file_name, total_leads, success_count, fail_count, duplicate_count, status, is_paused, is_cancelled, created_at, user_id, error_message, safety_pause_reason";
+        let query = api.from("upload_batches").select(fields).order("created_at", { ascending: false }).limit(50);
+        let unfinishedQuery = api.from("upload_batches").select(fields)
+          .in("status", ["uploading", "processing", "pending", "paused", "scheduled"])
+          .order("created_at", { ascending: false }).limit(200);
 
         if (!isAdmin && user?.id) {
           query = query.eq("user_id", user.id);
+          unfinishedQuery = unfinishedQuery.eq("user_id", user.id);
         }
 
-        const { data, error } = await query;
-
-        if (error) throw error;
+        const [recent, unfinished] = await Promise.all([query, unfinishedQuery]);
+        if (recent.error) throw recent.error;
+        if (unfinished.error) throw unfinished.error;
+        const data = [...new Map([...(unfinished.data || []), ...(recent.data || [])]
+          .map((batch) => [batch.id, batch] as const)).values()];
 
         const uniIds = [...new Set((data || []).map((b) => b.university_id).filter(Boolean))];
         let uniMap = new Map<string, string>();
@@ -130,12 +131,10 @@ function QueueMonitorInner() {
   }, [fetchBatches]);
 
   const { activeBatches, failedBatches, successBatches } = useMemo(() => {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     return {
       activeBatches: batches.filter(
         (b) =>
-          (b.status === "processing" || b.status === "pending" || b.status === "paused" || b.status === "scheduled" || b.is_paused) &&
-          b.created_at > twentyFourHoursAgo &&
+          (b.status === "uploading" || b.status === "processing" || b.status === "pending" || b.status === "paused" || b.status === "scheduled" || b.is_paused) &&
           !b.is_cancelled,
       ),
       failedBatches: batches.filter((b) => (b.status === "completed" && (b.fail_count + (b.duplicate_count || 0) > 0)) || b.status === "failed" || b.status === "cancelled"),

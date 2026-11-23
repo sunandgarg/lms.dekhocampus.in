@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS lms_lead_queue (
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (batch_id, lead_index),
-  INDEX queue_next (status, created_at)
+  INDEX queue_next (status, created_at),
+  INDEX queue_batch_status (batch_id, status, lead_index)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS lms_inbound_ids (

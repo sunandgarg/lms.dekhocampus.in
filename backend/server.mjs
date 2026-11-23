@@ -116,6 +116,7 @@ function checkBatchId(value) {
 }
 
 export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.dekhocampus.com' }) {
+  let activeSourceUploads = 0;
   return async (request, response) => {
     try {
       const url = new URL(request.url, `http://${host}`);
@@ -370,10 +371,14 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
         checkBatchId(source[1]);
         await requireOwnedBatch(db, user, source[1]);
         if (!bucket) throw new Error('Archive bucket is not configured');
-        const filename = request.headers['x-filename'] || 'source.csv';
-        const body = await readBody(request, MAX_FILE_BYTES);
-        const key = await saveSourceFile({ s3, bucket, batchId: source[1], filename, body });
-        return send(response, 200, { key });
+        if (activeSourceUploads >= 2) return send(response, 429, { error: 'Archive uploads are busy. Retry shortly.' }, { 'Retry-After': '2' });
+        activeSourceUploads++;
+        try {
+          const filename = request.headers['x-filename'] || 'source.csv';
+          const body = await readBody(request, MAX_FILE_BYTES);
+          const key = await saveSourceFile({ s3, bucket, batchId: source[1], filename, body });
+          return send(response, 200, { key });
+        } finally { activeSourceUploads--; }
       }
 
       const queue = /^\/api\/batches\/([^/]+)\/queue$/.exec(url.pathname);
