@@ -3,7 +3,7 @@
  *
  * This replaces the dual localStorage/sessionStorage systems with a single,
  * lightweight implementation that:
- * 1. Uses localStorage only for non-sensitive upload metadata
+ * 1. Uses tab-local sessionStorage for non-sensitive upload metadata
  * 2. Saves immediately on visibility change (tab switch)
  * 3. Saves on beforeunload (browser close)
  * 4. Hydrates state synchronously on mount
@@ -218,8 +218,8 @@ function normalizeUploadState(state: UploadState): UploadState {
 
 function loadFromStorage(): { state: UploadState; processing: ProcessingState } {
   try {
-    const stateStr = localStorage.getItem(STORAGE_KEY);
-    const processingStr = localStorage.getItem(PROCESSING_STATE_KEY);
+    const stateStr = sessionStorage.getItem(STORAGE_KEY);
+    const processingStr = sessionStorage.getItem(PROCESSING_STATE_KEY);
 
     const state = stateStr ? JSON.parse(stateStr) : DEFAULT_STATE;
     const processing = processingStr ? JSON.parse(processingStr) : DEFAULT_PROCESSING_STATE;
@@ -253,8 +253,8 @@ function saveToStorage(state: UploadState, processing: ProcessingState): void {
   try {
     const stateToPersist = sanitizeUploadStateForStorage(state);
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToPersist));
-    localStorage.setItem(PROCESSING_STATE_KEY, JSON.stringify(processing));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(stateToPersist));
+    sessionStorage.setItem(PROCESSING_STATE_KEY, JSON.stringify(processing));
   } catch (error) {
     console.error("[UploadStatePersistence] Failed to save:", error);
   }
@@ -262,8 +262,8 @@ function saveToStorage(state: UploadState, processing: ProcessingState): void {
 
 function clearStorage(): void {
   try {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(PROCESSING_STATE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(PROCESSING_STATE_KEY);
     // Storage cleared
   } catch (error) {
     console.error("[UploadStatePersistence] Failed to clear:", error);
@@ -395,7 +395,7 @@ interface UseUploadStatePersistenceReturn {
 export function useUploadStatePersistence(
   _options: UseUploadStatePersistenceOptions = {},
 ): UseUploadStatePersistenceReturn {
-  // Synchronous hydration from localStorage
+  // Synchronous hydration from this tab's sessionStorage
   const initialData = useMemo(() => loadFromStorage(), []);
 
   const [state, setStateInternal] = useState<UploadState>(initialData.state);
@@ -652,7 +652,7 @@ export function useUploadStatePersistence(
 // ============= Helper to check if there's saved data =============
 export function hasSavedUploadData(): boolean {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = sessionStorage.getItem(STORAGE_KEY);
     if (!stored) return false;
     const data = normalizeUploadState(JSON.parse(stored) as UploadState);
     return data.leads.length > 0 || data.fileName !== "";

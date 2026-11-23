@@ -466,7 +466,7 @@ export function UploadLeadsTab({
   selectedUniversity: initialSelectedUniversity,
   onSelectUniversity,
   onFileUpload,
-  onClearFile: _onClearFile,
+  onClearFile,
   onProcessingStateChange,
   currentFileName,
   currentProcessingState: _currentProcessingState = "idle",
@@ -504,6 +504,11 @@ export function UploadLeadsTab({
   const tempColumnMapping = persistedState.tempColumnMapping;
   const pageSize = persistedState.pageSize;
   const batchId = persistedState.batchId;
+
+  useEffect(() => {
+    // A copied URL can contain the source tab's CSV name, but never its file.
+    if (currentFileName && !fileName) onClearFile?.();
+  }, [currentFileName, fileName, onClearFile]);
 
   const [isProcessing, setIsProcessing] = useState(Boolean(persistedProcessing.isProcessing && persistedState.batchId));
   const [isPaused, setIsPaused] = useState(Boolean(persistedProcessing.isPaused));
@@ -654,6 +659,7 @@ export function UploadLeadsTab({
 
       if (batchError) throw batchError;
       if (!batch) throw new Error('Batch status was not found');
+      if (persistenceRef.current.state.batchId !== pollBatchId) return;
 
       setIsPaused(Boolean(batch.is_paused));
       setBatchStatus(batch.status || '');
@@ -668,6 +674,7 @@ export function UploadLeadsTab({
       const { data: results, error: resultError } = await api.from('leads')
         .select('status,api_response,extra_data').eq('batch_id', pollBatchId)
         .order('created_at', { ascending: true }).limit(Math.min(pageSize, 100));
+      if (persistenceRef.current.state.batchId !== pollBatchId) return;
       if (resultError) console.error('[Polling] Could not load preview responses:', resultError);
       const statuses = { ...persistenceRef.current.state.leadStatuses };
       const responses = { ...persistenceRef.current.state.leadResponses };
@@ -697,6 +704,7 @@ export function UploadLeadsTab({
           partnerExample = partnerExample.replace(/\s+/g, ' ').slice(0, 160);
         }
       }
+      if (persistenceRef.current.state.batchId !== pollBatchId) return;
       setPartnerMessage(partnerExample);
 
       const isBatchComplete =
@@ -2115,6 +2123,8 @@ export function UploadLeadsTab({
     setIsProcessing(false);
     setIsPaused(false);
     setBatchStatus('');
+    setSafetyPauseReason('');
+    setDiscussionWith('');
     setBatchCounts({ success: 0, failed: 0, duplicates: 0, processed: 0, total: 0 });
     setPartnerMessage('');
     setStartTime(null);
@@ -2124,7 +2134,15 @@ export function UploadLeadsTab({
     // ✅ FIX 5: Reset local mapping state on clear
     setLocalColumnMapping({});
     setShowColumnMapping(false);
+    setShowSourceEntry(false);
+    setShowScheduleModal(false);
+    setAlert(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const resetWorkspace = () => {
+    clearAll();
+    onClearFile?.();
   };
 
   const handlePageSizeChange = (size: number | "custom") => {
@@ -2190,8 +2208,7 @@ export function UploadLeadsTab({
         </div>
       )}
       {batchId && <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-        <span>{isPaused ? 'This batch is paused on the server. Resume the remaining queued leads when ready.' : batchStatus === 'scheduled' ? 'Scheduled on the server. You can close your browser; delivery starts at the selected time.' : 'Processing runs on the server after the full queue is saved. You can close your browser once queuing is complete.'}</span>
-        {isPaused && !safetyPauseReason && <button type="button" className="btn-success min-h-10 px-4" onClick={resumeProcessing}><Play className="mr-2 inline h-4 w-4" />Unblock & resume batch</button>}
+        <span>{isPaused ? 'Batch paused.' : batchStatus === 'scheduled' ? 'Batch scheduled.' : 'Batch in progress.'}</span>
         <a className="font-semibold text-primary underline" href={`/api/batches/${batchId}/response.csv`}>Download response CSV</a>
       </div>}
 
@@ -2207,11 +2224,11 @@ export function UploadLeadsTab({
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-foreground">
                     {!hasLoadedLeads && batchId && isProcessing
-                      ? `Server processing: ${batchCounts.processed} / ${batchCounts.total || '…'}`
+                      ? `Progress: ${batchCounts.processed} / ${batchCounts.total || '…'}`
                       : !hasLoadedLeads
                       ? selectedUniversity
-                        ? currentFileName || fileName
-                          ? `CSV selected: ${currentFileName || fileName}`
+                        ? fileName
+                          ? `CSV selected: ${fileName}`
                           : "Select a CSV to push leads"
                         : "Loading upload controls..."
                       : isProcessing
@@ -2224,7 +2241,7 @@ export function UploadLeadsTab({
                     {hasValidationErrors
                       ? `${validationErrors.size} rows have warnings. Process sends every row; edit warnings first if needed.`
                       : batchId && isProcessing
-                        ? 'This batch is running on the server. The queue monitor shows its progress.'
+                        ? 'See Queue Monitor or Upload History for details.'
                       : hasLoadedLeads
                         ? "Action buttons stay visible here while you review the preview."
                         : selectedUniversity
@@ -2256,9 +2273,9 @@ export function UploadLeadsTab({
                 )}
 
                 {batchId && isPaused ? (
-                  <button type="button" onClick={resumeProcessing} disabled={Boolean(safetyPauseReason) && !discussionWith.trim()}
-                    className="btn-success flex min-h-12 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
-                    <Play className="h-5 w-5" /> Unblock & resume batch
+                  <button type="button" onClick={resetWorkspace}
+                    className="flex min-h-12 w-full items-center justify-center rounded-lg bg-destructive px-5 font-medium text-destructive-foreground sm:w-auto">
+                    Reset
                   </button>
                 ) : batchId && isProcessing && !hasLoadedLeads ? (
                   <div className="flex w-full gap-2 sm:w-auto">
@@ -2523,7 +2540,7 @@ export function UploadLeadsTab({
                     </button>
                   )}
                   <button
-                    onClick={clearAll}
+                    onClick={resetWorkspace}
                     className="text-sm text-destructive hover:underline"
                     disabled={isProcessing}
                   >
