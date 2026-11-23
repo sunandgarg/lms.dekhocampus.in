@@ -207,6 +207,10 @@ export function AllLeadsPage() {
   const [dateTo, setDateTo] = useState('');
   const [segment, setSegment] = useState('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteIds, setDeleteIds] = useState<string[]>([]);
+  const [deleteStage, setDeleteStage] = useState<'question' | 'confirm' | null>(null);
+  const [deleteText, setDeleteText] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [retryCandidates, setRetryCandidates] = useState<RetryCandidate[]>([]);
   const [retryUniversityId, setRetryUniversityId] = useState('');
   const [retryOpen, setRetryOpen] = useState(false);
@@ -389,6 +393,7 @@ export function AllLeadsPage() {
   const safePage = Math.min(currentPage, totalPages);
   const pageGroups = grouped.slice((safePage - 1) * rowsPerPage, safePage * rowsPerPage);
   const visibleRows = pageGroups.flatMap(({ key, items, latest }) => expanded.has(key) ? items : [latest]);
+  const selectedMatchingCount = filtered.filter((lead) => selectedIds.has(lead.id)).length;
 
   useEffect(() => { setCurrentPage(1); }, [search, segment, statusFilter, sourceFilter, mediumFilter,
     campaignFilter, courseFilter, universityFilter, cityFilter, stateFilter, contactFilter, dateFrom, dateTo,
@@ -525,18 +530,35 @@ export function AllLeadsPage() {
     }
   };
 
-  const handleDeleteLeads = useCallback(async (ids: string[]) => {
-    if (!isAdmin || !ids.length || !window.confirm(
-      `Delete ${ids.length} lead submission${ids.length === 1 ? '' : 's'} from All Leads? Other submissions for the same contact, delivery history, and S3 archives will remain.`)) return;
-    const { data, error } = await api.functions.invoke('delete-leads', { body: { lead_ids: ids } });
-    if (error) toast({ title: 'Could not delete leads', description: error.message, variant: 'destructive' });
-    else {
-      toast({ title: `${data.deleted} lead${data.deleted === 1 ? '' : 's'} deleted from All Leads` });
-      setSelectedIds(new Set());
-      setDetailLead(null);
-      fetchLeads(true);
+  const requestDelete = (ids: string[]) => {
+    if (!isAdmin || !ids.length) return;
+    if (ids.length > 100) {
+      toast({ title: 'Select up to 100 leads to delete at once', variant: 'destructive' });
+      return;
     }
-  }, [isAdmin, toast, fetchLeads]);
+    setDetailLead(null);
+    setDeleteIds(ids);
+    setDeleteText('');
+    setDeleteStage('question');
+  };
+
+  const confirmDelete = async () => {
+    if (!isAdmin || deleteStage !== 'confirm' || deleteText !== 'DELETE' || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      const { data, error } = await api.functions.invoke('delete-leads', { body: { lead_ids: deleteIds } });
+      if (error) throw error;
+      toast({ title: `${data.deleted} lead${data.deleted === 1 ? '' : 's'} removed from All Leads` });
+      setSelectedIds(new Set());
+      setDeleteStage(null);
+      setDeleteIds([]);
+      await fetchLeads(true);
+    } catch (error: any) {
+      toast({ title: 'Could not delete leads', description: error.message, variant: 'destructive' });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   const statusBadge = (s: string) => {
     const map: Record<string, string> = {
@@ -757,13 +779,46 @@ export function AllLeadsPage() {
           </DialogContent>
         </Dialog>
 
+        <Dialog open={deleteStage !== null} onOpenChange={(open) => {
+          if (!open && !deleteBusy) { setDeleteStage(null); setDeleteIds([]); setDeleteText(''); }
+        }}>
+          <DialogContent className="sm:max-w-lg">
+            {deleteStage === 'question' ? <>
+              <DialogHeader><DialogTitle className="flex items-center gap-2"><Trash2 className="h-5 w-5 text-destructive" />Delete {deleteIds.length} lead{deleteIds.length === 1 ? '' : 's'}?</DialogTitle></DialogHeader>
+              <p className="text-sm text-muted-foreground">Do you really want to remove {deleteIds.length === 1 ? 'this submission' : 'these submissions'} from All Leads? Related delivery history and private S3 archives will remain.</p>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setDeleteStage(null)}>Cancel</Button>
+                <Button variant="destructive" onClick={() => setDeleteStage('confirm')}>Yes, continue</Button>
+              </div>
+            </> : <>
+              <DialogHeader><DialogTitle className="flex items-center gap-2"><Trash2 className="h-5 w-5 text-destructive" />Confirm deletion</DialogTitle></DialogHeader>
+              <p className="text-sm text-muted-foreground">{deleteIds.length} lead submission{deleteIds.length === 1 ? '' : 's'} will be removed from All Leads. Delivery history and private S3 archives will remain. This cannot be undone from this screen.</p>
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+                <label htmlFor="confirm-delete-leads" className="mb-2 block text-sm font-medium">Type <strong className="text-destructive">DELETE</strong> to confirm:</label>
+                <Input id="confirm-delete-leads" autoFocus autoComplete="off" value={deleteText} onChange={(event) => setDeleteText(event.target.value)} disabled={deleteBusy} />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteStage(null)}>Cancel</Button>
+                <Button variant="destructive" disabled={deleteText !== 'DELETE' || deleteBusy} onClick={confirmDelete}>
+                  {deleteBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Delete from All Leads
+                </Button>
+              </div>
+            </>}
+          </DialogContent>
+        </Dialog>
+
         {selectedIds.size > 0 && <div className="flex flex-wrap items-center gap-2 border-b bg-primary/5 px-4 py-2 text-sm">
           <strong>{selectedIds.size} selected</strong>
+          {visibleRows.length > 0 && visibleRows.every((lead) => selectedIds.has(lead.id)) && selectedMatchingCount < filtered.length &&
+            <Button size="sm" variant="secondary" onClick={() => setSelectedIds((current) => new Set([...current, ...filtered.map((lead) => lead.id)]))}>
+              Select all {filtered.length} {hasMore ? 'loaded ' : ''}matching leads
+            </Button>}
+          {selectedMatchingCount === filtered.length && filtered.length > visibleRows.length && <span className="text-xs text-muted-foreground">All loaded matching leads selected{hasMore ? '; load older leads to include more' : ''}.</span>}
           <Button size="sm" variant="outline" disabled={retryDiscovering || retryRunning} onClick={handleBulkRetry}>
             <RefreshCw className={`mr-1 h-3.5 w-3.5 ${retryDiscovering ? 'animate-spin' : ''}`} /> {retryDiscovering ? 'Finding failures…' : 'Retry failed'}
           </Button>
           <Button size="sm" variant="outline" onClick={() => downloadCSV(leads.filter((lead) => selectedIds.has(lead.id)), isAdmin ? 'selected-leads.csv' : 'selected-leads-masked.csv', !isAdmin)}><Download className="mr-1 h-3.5 w-3.5" /> {isAdmin ? 'Download selected' : 'Download selected masked'}</Button>
-          {isAdmin && <Button size="sm" variant="destructive" disabled={selectedIds.size > 100} onClick={() => handleDeleteLeads([...selectedIds])}><Trash2 className="mr-1 h-3.5 w-3.5" /> Delete selected{selectedIds.size > 100 ? ' (max 100)' : ''}</Button>}
+          {isAdmin && <Button size="sm" variant="destructive" disabled={selectedIds.size > 100} onClick={() => requestDelete([...selectedIds])}><Trash2 className="mr-1 h-3.5 w-3.5" /> Delete selected{selectedIds.size > 100 ? ' (max 100)' : ''}</Button>}
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button>
         </div>}
 
@@ -803,7 +858,7 @@ export function AllLeadsPage() {
                     {expanded.has(key) ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}{items.length} entries</button> : index === 0 ? <span className="text-xs text-muted-foreground">First seen {formatDate(firstAt)}</span> : <span className="text-xs text-muted-foreground">History</span>}</TableCell>
                   <TableCell className="align-top"><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`View details for ${lead.name || 'lead'}`} onClick={() => setDetailLead(lead)}><Eye className="h-4 w-4" /></Button>
                     {lead.status === 'Failed' && <Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`Retry ${lead.name || 'lead'}`} onClick={() => handleRetryLead(lead)}><RefreshCw className="h-4 w-4" /></Button>}
-                    {isAdmin && <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" aria-label={`Delete submission for ${lead.name || 'lead'}`} onClick={() => handleDeleteLeads([lead.id])}><Trash2 className="h-4 w-4" /></Button>}</div></TableCell>
+                    {isAdmin && <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" aria-label={`Delete submission for ${lead.name || 'lead'}`} onClick={() => requestDelete([lead.id])}><Trash2 className="h-4 w-4" /></Button>}</div></TableCell>
                 </TableRow>))}
             </TableBody>
           </Table>}
@@ -906,7 +961,7 @@ export function AllLeadsPage() {
                     <RefreshCw className="h-4 w-4 mr-2" /> Retry This Lead
                   </Button>
                 )}
-                {isAdmin && <Button variant="destructive" className="w-full" onClick={() => handleDeleteLeads([detailLead.id])}>
+                {isAdmin && <Button variant="destructive" className="w-full" onClick={() => requestDelete([detailLead.id])}>
                   <Trash2 className="h-4 w-4 mr-2" /> Delete this submission
                 </Button>}
               </div>

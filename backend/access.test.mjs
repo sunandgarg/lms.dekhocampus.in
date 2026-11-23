@@ -54,6 +54,12 @@ test('team users cannot edit university configuration', async () => {
   await assert.rejects(userRecords(db, user, { table: 'universities', action: 'update', values: { status: 'disabled' } }), /Access denied/);
 });
 
+test('team users cannot delete records even with lead push permission', async () => {
+  const db = { execute: async () => [[{ data: { permission: 'lead-push.upload' } }]] };
+  await assert.rejects(userRecords(db, user, { table: 'upload_batches', action: 'delete',
+    filters: [{ field: 'id', op: 'eq', value: 'd761817d-acba-4aad-bd2f-f173502996d7' }] }), /Access denied/);
+});
+
 test('administrator uploads are owned by the signed-in administrator', async () => {
   const admin = { id: '7c94e1dd-c102-48cc-894b-c72e147c6a53', role: 'super_admin' };
   let saved;
