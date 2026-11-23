@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { archiveAndDeliver } from './archive.mjs';
 import { buildPayload, categorizeResponse } from './lead-payload.mjs';
 import { validPartnerUrl } from './lead-processor.mjs';
+import { glaOnlineRequest } from './gla-online.mjs';
 
 function nested(value, path) {
   return String(path || '').split('.').reduce((current, key) => current?.[key], value);
@@ -41,10 +42,13 @@ export async function testApi(input, { s3, bucket } = {}) {
     authHeaderKey: input.authHeaderKey, authHeaderValue: input.authHeaderValue };
   const { payload, headers } = buildPayload(lead, config);
   const body = input.payloadWrapper === 'array' ? [payload] : payload;
+  const outbound = config.apiType === 'glaonline'
+    ? glaOnlineRequest(input.apiUrl, payload)
+    : { url: input.apiUrl, method: 'POST', headers, body };
   const archiveId = randomUUID();
   const response = await archiveAndDeliver({ s3, bucket, batchId: archiveId,
-    input: { leadData: lead, outbound: { url: input.apiUrl, method: 'POST', headers, body }, apiConfig: config },
-    deliver: () => sendTest(input.apiUrl, 'POST', headers, body, input.apiTimeoutSeconds),
+    input: { leadData: lead, outbound, apiConfig: config },
+    deliver: () => sendTest(outbound.url, outbound.method, outbound.headers, outbound.body, input.apiTimeoutSeconds),
   });
   const status = categorizeResponse(response.status, response.text, response.ok);
   const message = String(response.parsed?.message || response.parsed?.Message || '').slice(0, 500);

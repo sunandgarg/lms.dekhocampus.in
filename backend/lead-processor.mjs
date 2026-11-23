@@ -7,6 +7,7 @@ import { syncLeadToCrm } from './crm-sync.mjs';
 import { updateLeadStats } from './stats.mjs';
 import { mergePartnerMapping } from './inbound-field-overrides.mjs';
 import { batchHalted } from './batch-gate.mjs';
+import { glaOnlineRequest } from './gla-online.mjs';
 
 let activeDeliveries = 0;
 const waitingDeliveries = [];
@@ -164,8 +165,9 @@ async function deliverPartner(task, config, db, outbound) {
 
   const timeout = Math.min(300, Math.max(5, Number(config.apiTimeoutSeconds) || 30));
   try {
-    const response = await fetch(config.apiUrl, {
-      method: 'POST', headers: outbound.headers, body: JSON.stringify(outbound.body),
+    const response = await fetch(outbound.url, {
+      method: outbound.method, headers: outbound.headers,
+      body: outbound.method === 'GET' ? undefined : JSON.stringify(outbound.body),
       signal: AbortSignal.timeout(timeout * 1000), redirect: 'error',
     });
     const responseBody = (await response.text()).slice(0, 64_000);
@@ -194,8 +196,10 @@ export async function processLead({ db, s3, bucket, task, userId }) {
   if (!university) { const error = new Error('University not found'); error.status = 404; throw error; }
   const config = universityConfig(university, task.apiConfig);
   const { payload, headers } = buildPayload(task.leadData, config);
-  const outbound = { url: config.apiUrl, method: 'POST', headers,
-    body: config.payloadWrapper === 'array' && !Array.isArray(payload) ? [payload] : payload };
+  const outbound = config.apiType === 'glaonline'
+    ? glaOnlineRequest(config.apiUrl, payload)
+    : { url: config.apiUrl, method: 'POST', headers,
+      body: config.payloadWrapper === 'array' && !Array.isArray(payload) ? [payload] : payload };
   const transactionId = randomUUID();
   const prefix = `batches/${task.batchId}/transactions/${transactionId}/`;
   let result;

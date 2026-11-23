@@ -1,3 +1,5 @@
+import { glaOnlinePayload } from './gla-online.mjs';
+
 // Partner payload mapping retained from the existing lead processor.
 function buildPayload(leadData, apiConfig) {
     const headers = { "Content-Type": "application/json" };
@@ -72,6 +74,9 @@ function buildPayload(leadData, apiConfig) {
             leadDataWithDefaults[source] = tenDigitMobile(leadDataWithDefaults[source], source);
     }
     let payload;
+    if (apiConfig.apiType === "glaonline") {
+        return { payload: glaOnlinePayload(leadDataWithDefaults, apiConfig.source || 'dekho_campus'), headers: {} };
+    }
     if (apiConfig.apiType === "upgrad") {
         const src = leadDataWithDefaults.leadSource || apiConfig.source || "";
         const med = leadDataWithDefaults.leadMedium || apiConfig.medium || "";

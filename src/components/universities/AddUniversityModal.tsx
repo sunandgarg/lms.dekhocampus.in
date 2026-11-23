@@ -85,6 +85,7 @@ const apiTypeOptions = [
   { value: "leadsquared", label: "LeadSquared", description: "Array of Attribute/Value pairs" },
   { value: "upgrad", label: "upGrad Lead-Drop", description: "Nested JSON + Basic auth + UTM headers" },
   { value: "custom", label: "Custom JSON API", description: "Generic JSON payload format" },
+  { value: "glaonline", label: "GLA Online", description: "GET registration API with program codes" },
 ];
 
 export const AddUniversityModal = forwardRef<HTMLDivElement, AddUniversityModalProps>(function AddUniversityModal(
@@ -285,6 +286,9 @@ export const AddUniversityModal = forwardRef<HTMLDivElement, AddUniversityModalP
       const urlErr = validateUpgradUrl(formData.apiUrl);
       if (urlErr) newErrors.apiUrl = urlErr;
       if (!formData.secretKey.trim()) newErrors.secretKey = "Basic-auth credentials required (vendor:password or base64)";
+    } else if (formData.apiType === "glaonline") {
+      if (formData.apiUrl.trim() !== 'https://glawebapi.glaonline.com/api/ChannelPartner/CPRegistrationOnline_API')
+        newErrors.apiUrl = 'Use the GLA Online registration endpoint without sample lead parameters';
     } else if (formData.apiType === "custom") {
       // Custom: only validate URL format if provided
       if (formData.apiUrl.trim() && !formData.apiUrl.startsWith("http")) {
@@ -552,7 +556,7 @@ export const AddUniversityModal = forwardRef<HTMLDivElement, AddUniversityModalP
               </div>
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">
-                  API URL {(formData.apiType === "nopaperforms" || formData.apiType === "upgrad") && "*"}
+                  API URL {(formData.apiType === "nopaperforms" || formData.apiType === "upgrad" || formData.apiType === "glaonline") && "*"}
                 </label>
                 <input
                   type="url"
@@ -561,12 +565,15 @@ export const AddUniversityModal = forwardRef<HTMLDivElement, AddUniversityModalP
                   onChange={handleInputChange}
                   className={`input-field ${errors.apiUrl ? "border-destructive" : ""}`}
                   placeholder={
-                    formData.apiType === "upgrad"
+                    formData.apiType === "glaonline"
+                      ? "https://glawebapi.glaonline.com/api/ChannelPartner/CPRegistrationOnline_API"
+                      : formData.apiType === "upgrad"
                       ? "https://staging-lead-ms.upgrad.dev/apis/lead-drop/vendor/dekhocampus/"
                       : "https://api.nopaperforms.com/..."
                   }
                 />
                 {errors.apiUrl && <p className="text-xs text-destructive mt-1">{errors.apiUrl}</p>}
+                {formData.apiType === "glaonline" && <p className="text-xs text-muted-foreground mt-1">Use the base URL only. GLA Online sends each lead as a GET request with Name, DOB, EmailId, Mobile, ProgramCode, source and City.</p>}
                 {formData.apiType === "upgrad" && !errors.apiUrl && (
                   <p className="text-xs text-muted-foreground mt-1">
                     Must end with <code>/apis/lead-drop/vendor/&lt;slug&gt;/</code> - replace <code>&lt;slug&gt;</code> with the vendor slug upGrad provided.
@@ -860,7 +867,7 @@ export const AddUniversityModal = forwardRef<HTMLDivElement, AddUniversityModalP
           </section>
 
           {/* Test API Button */}
-          <section>
+          {formData.apiType !== "glaonline" && <section>
             <h3 className="font-medium text-foreground mb-4">Test API Connection</h3>
             <div className="flex items-center gap-4">
               <button
@@ -887,7 +894,7 @@ export const AddUniversityModal = forwardRef<HTMLDivElement, AddUniversityModalP
                 </div>
               )}
             </div>
-          </section>
+          </section>}
 
           {/* Rate Limiting */}
           <section>
