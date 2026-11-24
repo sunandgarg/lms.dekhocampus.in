@@ -795,12 +795,14 @@ export function AllLeadsPage() {
 
         <div className="overflow-x-auto">
           {loading ? <div className="flex items-center justify-center py-16 text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading leads...</div> :
-          <Table className="min-w-[1420px] text-base">
+          <Table className="min-w-[1600px] text-base">
             <TableHeader><TableRow className="table-header">
               <TableHead className="w-10"><Checkbox aria-label="Select all leads shown on this page" checked={visibleRows.length > 0 && visibleRows.every((lead) => selectedIds.has(lead.id))} onCheckedChange={toggleAll} /></TableHead>
               {sortHeader('Name','name')}
               <TableHead>Email</TableHead>
               <TableHead>Mobile</TableHead>
+              <TableHead>State</TableHead>
+              <TableHead>City</TableHead>
               {sortHeader('Source','source')}
               <TableHead>Medium</TableHead>
               <TableHead>Campaign</TableHead>
@@ -810,7 +812,7 @@ export function AllLeadsPage() {
               <TableHead className="w-28 text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {grouped.length === 0 ? <TableRow><TableCell colSpan={11} className="py-16 text-center text-muted-foreground">
+              {grouped.length === 0 ? <TableRow><TableCell colSpan={13} className="py-16 text-center text-muted-foreground">
                 <Inbox className="mx-auto mb-3 h-8 w-8 opacity-40" /><p className="font-medium text-foreground">No matching leads</p><p className="mt-1 text-sm">Try another filter or refresh to check new enquiries.</p>
               </TableCell></TableRow> : pageGroups.flatMap(({ key, items, latest, firstAt }) =>
                 (expanded.has(key) ? items : [latest]).map((lead, index) => <TableRow key={lead.id} className={index > 0 ? 'bg-muted/20' : 'hover:bg-muted/30'}>
@@ -818,6 +820,8 @@ export function AllLeadsPage() {
                   <TableCell className="align-top"><button type="button" onClick={() => setDetailLead(lead)} className="text-left font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{lead.name || 'Unnamed lead'}</button></TableCell>
                   <TableCell className="max-w-[220px] truncate align-top text-base" title={lead.email}>{lead.email || '-'}</TableCell>
                   <TableCell className="whitespace-nowrap align-top text-base tabular-nums">{lead.mobile || '-'}</TableCell>
+                  <TableCell className="max-w-[150px] truncate align-top text-base" title={leadState(lead)}>{leadState(lead) || '-'}</TableCell>
+                  <TableCell className="max-w-[150px] truncate align-top text-base" title={lead.city}>{lead.city || '-'}</TableCell>
                   <TableCell className="align-top"><Badge variant="outline" className="max-w-[150px] truncate">{attributionSource(lead)}</Badge></TableCell>
                   <TableCell className="align-top text-base">{lead.medium || field(lead,'utm_medium','utmMedium')}</TableCell>
                   <TableCell className="max-w-[200px] truncate align-top text-base" title={lead.campaign}>{lead.campaign || field(lead,'utm_campaign','utmCampaign')}</TableCell>
