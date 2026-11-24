@@ -81,9 +81,17 @@ export async function sourceReview(db, user, input) {
     const [reviews] = await db.execute(`SELECT r.id, r.source, r.medium, r.proposed_source, r.proposed_medium,
       r.note, r.status, r.created_at, r.reviewed_at, u.email AS author
       FROM lms_source_reviews r JOIN lms_users u ON u.id = r.user_id
-      ${isAdmin(user) ? '' : 'WHERE r.user_id = ?'}
+      ${isAdmin(user) ? '' : "WHERE r.status = 'approved' OR r.user_id = ?"}
       ORDER BY r.created_at DESC LIMIT 200`, isAdmin(user) ? [] : [user.id]);
-    return { sources, reviews };
+    const [settings] = await db.execute(`SELECT data FROM lms_records WHERE collection = 'app_settings'
+      AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.key')) = 'lead_attribution_rules' LIMIT 1`);
+    let rules = [];
+    if (settings.length) {
+      const setting = typeof settings[0].data === 'string' ? JSON.parse(settings[0].data) : settings[0].data;
+      try { rules = JSON.parse(setting.value); } catch { /* Ignore invalid saved rules. */ }
+      if (!Array.isArray(rules)) rules = [];
+    }
+    return { sources, reviews, rules: rules.filter((rule) => rule && rule.enabled !== false && rule.match && rule.set) };
   }
   if (action === 'submit' || action === 'publish') {
     if (action === 'publish' && !isAdmin(user)) fail(403, 'Admin approval required');

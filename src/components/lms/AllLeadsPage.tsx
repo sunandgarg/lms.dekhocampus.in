@@ -661,7 +661,7 @@ export function AllLeadsPage() {
       </div>
 
       <Dialog open={showSources} onOpenChange={setShowSources}>
-        <DialogContent className="flex max-h-[90vh] w-[min(96vw,1000px)] max-w-none flex-col gap-3 overflow-hidden p-0">
+        <DialogContent className="flex max-h-[90vh] w-[min(94vw,820px)] max-w-none flex-col gap-3 overflow-hidden p-0">
           <DialogHeader className="border-b px-5 py-4">
             <DialogTitle>Sources & notes</DialogTitle>
           </DialogHeader>

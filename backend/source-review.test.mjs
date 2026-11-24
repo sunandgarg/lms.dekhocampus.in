@@ -23,3 +23,20 @@ test('admin approval replaces the matching source rule without touching other ca
   assert.deepEqual(updated[0].set, { source: 'Meta', medium: 'CPC', campaign: '' });
   assert.equal(updated[1], rules[1]);
 });
+
+test('source list exposes active incoming-to-LMS mappings and approved explanations to users', async () => {
+  const db = { execute: async (sql) => {
+    if (sql.includes('GROUP BY source')) return [[{ source: 'Meta', medium: 'paid', leads: 1 }]];
+    if (sql.includes('FROM lms_source_reviews')) {
+      assert.match(sql, /r.status = 'approved' OR r.user_id/);
+      return [[{ source: 'fb', medium: 'paid', status: 'approved', note: 'Facebook form leads' }]];
+    }
+    return [[{ data: JSON.stringify({ value: JSON.stringify([
+      { id: 'active', enabled: true, match: { source: 'fb', medium: 'paid' }, set: { source: 'Meta' } },
+      { id: 'disabled', enabled: false, match: { source: 'old' }, set: { source: 'new' } },
+    ]) }) }]];
+  } };
+  const result = await sourceReview(db, { id: 'user-1', role: 'user' }, { action: 'list' });
+  assert.deepEqual(result.rules.map((rule) => rule.id), ['active']);
+  assert.equal(result.reviews[0].note, 'Facebook form leads');
+});
