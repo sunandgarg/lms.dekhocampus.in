@@ -64,7 +64,11 @@ export async function sourceReview(db, user, input) {
   if (action === 'list') {
     const [sources] = await db.execute(`SELECT
       JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')) AS source,
-      COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.extra_data.attribution_medium')), '') AS medium,
+      COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.extra_data.attribution_medium')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.extra_data.utm_medium')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.extra_data.lead_medium')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.extra_data.leadMedium')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.extra_data.medium')), ''), '') AS medium,
       COUNT(*) AS leads,
       COUNT(DISTINCT NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.campaign')), '')) AS campaigns,
       GROUP_CONCAT(DISTINCT NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.campaign')), '')
