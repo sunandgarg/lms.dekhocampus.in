@@ -24,6 +24,7 @@ import { handleAdWebhook, verifyMeta } from './ad-webhooks.mjs';
 import { receiveEmailEvents } from './email-webhook.mjs';
 import { authorizeShortApi, shortAnalytics, shorten } from './short-api.mjs';
 import { retryInboundDelivery, retryLeads, runAutoRetries } from './retry.mjs';
+import { sourceReview } from './source-review.mjs';
 import { enqueueLeads, sealQueue, workQueue, recoverQueue, controlBatch, activateScheduledBatches } from './queue.mjs';
 import { Readable } from 'node:stream';
 import { isIP } from 'node:net';
@@ -214,6 +215,9 @@ export function makeHandler({ db, s3, bucket, secureCookies = true, host = 'lms.
           order: [{ field: 'created_at', ascending: false }], limit: 1000 });
         return send(response, 200, { ids: data.filter((batch) =>
           !/^(API_|facebook_ads_|google_ads_|bing_ads_|LandingPage:)/i.test(batch.file_name || '')).map((batch) => batch.id) });
+      }
+      if (url.pathname === '/api/functions/source-review' && method === 'POST') {
+        return send(response, 200, await sourceReview(db, user, await readJson(request)));
       }
       if (url.pathname === '/api/functions/all-leads-deliveries' && method === 'POST') {
         const ids = (await readJson(request)).lead_ids;

@@ -81,3 +81,19 @@ CREATE TABLE IF NOT EXISTS lms_inbound_ids (
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (connection_id, external_key_hash)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS lms_source_reviews (
+  id CHAR(36) PRIMARY KEY,
+  source VARCHAR(200) NOT NULL,
+  medium VARCHAR(200) NOT NULL DEFAULT '',
+  proposed_source VARCHAR(200) NOT NULL DEFAULT '',
+  proposed_medium VARCHAR(200) NOT NULL DEFAULT '',
+  note TEXT NOT NULL,
+  status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+  user_id CHAR(36) NOT NULL,
+  reviewed_by CHAR(36) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  reviewed_at TIMESTAMP(3) NULL,
+  INDEX source_review_status (status, created_at),
+  INDEX source_review_user (user_id, created_at)
+) ENGINE=InnoDB;

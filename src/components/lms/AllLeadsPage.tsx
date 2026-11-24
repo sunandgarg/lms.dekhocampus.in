@@ -17,6 +17,7 @@ import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
 import { AttributionRulesSettings } from './AttributionRulesSettings';
+import { SourceReviewSettings } from './SourceReviewSettings';
 import { deliveryResult, summarizeDeliveries, type LeadDelivery } from './delivery-summary';
 import { retrySources } from './retry-sources';
 import { maskContactText, maskEmail, maskMobile } from '@/utils/contactMask';
@@ -227,6 +228,8 @@ export function AllLeadsPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showAutomation, setShowAutomation] = useState(false);
   const [showAttribution, setShowAttribution] = useState(false);
+  const [showSources, setShowSources] = useState(false);
+  const [attributionVersion, setAttributionVersion] = useState(0);
   const fetchLeads = useCallback(
     async (_forceRefresh = false) => {
       setLoading(true);
@@ -642,6 +645,9 @@ export function AllLeadsPage() {
           <p className="mt-1 text-sm text-muted-foreground">Search enquiries, review university delivery, and act on selected leads.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowSources(!showSources)} aria-expanded={showSources}>
+            Sources & notes {showSources ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
+          </Button>
           {isAdmin && <Button variant="outline" size="sm" onClick={() => setShowAttribution(!showAttribution)} aria-expanded={showAttribution}>
             Source · Medium · Campaign defaults {showAttribution ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
           </Button>}
@@ -654,10 +660,11 @@ export function AllLeadsPage() {
         </div>
       </div>
 
+      {showSources && <SourceReviewSettings onPublished={() => setAttributionVersion((value) => value + 1)} />}
       {isAdmin && showAutomation && <LeadAutomationSettings incomingExtraFields={[...new Set(leads
         .filter((lead) => lead.isInbound)
         .flatMap((lead) => Object.keys(lead.extraData || {})))].sort()} />}
-      {isAdmin && showAttribution && <AttributionRulesSettings />}
+      {isAdmin && showAttribution && <AttributionRulesSettings key={attributionVersion} />}
 
       <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
         <span className="font-semibold text-foreground">Source</span> = where the lead came from (for example, Facebook);{' '}
