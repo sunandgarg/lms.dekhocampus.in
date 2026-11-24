@@ -345,6 +345,74 @@ export function AdPlatformsPage() {
     setActiveView('detail');
   };
 
+  const setupDialog = (
+    <Dialog open={showSetup} onOpenChange={setShowSetup}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-display">
+            Set up {setupPlatform === 'facebook' ? 'Meta' : setupPlatform === 'bing' ? 'Microsoft / Bing' : 'Google Ads'} Webhook
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label>Account / Integration Name *</Label>
+            <Input value={setupName} onChange={e => setSetupName(e.target.value)} placeholder="e.g. My Business Page" />
+          </div>
+
+          <div>
+            <Label>Route Leads to University</Label>
+            <Select value={setupUniId || '__none__'} onValueChange={v => setSetupUniId(v === '__none__' ? '' : v)}>
+              <SelectTrigger><SelectValue placeholder="Select university..." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Store only (no auto-push)</SelectItem>
+                {universities.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">By default, leads arrive in All Leads. Choose a university here or create rules under All Leads → Lead automation to push them onward.</p>
+          </div>
+
+          <div>
+            <Label className="flex items-center gap-1"><Settings2 className="h-3.5 w-3.5" /> Field Mapping</Label>
+            <p className="text-xs text-muted-foreground mb-2">Map ad platform field names to your system fields</p>
+            <div className="space-y-1">
+              {Object.entries(setupMapping).map(([from, to]) => (
+                <div key={from} className="flex items-center gap-2 text-sm">
+                  <code className="flex-1 bg-muted/50 px-2 py-1 rounded text-xs font-mono truncate">{from}</code>
+                  <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <Select value={to} onValueChange={v => setSetupMapping(prev => ({ ...prev, [from]: v }))}>
+                    <SelectTrigger className="h-8 w-[140px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>{SYSTEM_FIELDS.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removeFieldMapping(from)}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-2">
+              <Input className="h-8 text-xs" placeholder="Ad field name" value={newFieldKey} onChange={e => setNewFieldKey(e.target.value)} />
+              <Select value={newFieldValue || '__pick__'} onValueChange={v => setNewFieldValue(v === '__pick__' ? '' : v)}>
+                <SelectTrigger className="h-8 w-[140px]"><SelectValue placeholder="Map to..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__pick__">Select field...</SelectItem>
+                  {SYSTEM_FIELDS.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" className="h-8" onClick={addFieldMapping}>Add</Button>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowSetup(false)}>Cancel</Button>
+          <Button onClick={saveIntegration} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
+            Create Webhook
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -686,6 +754,7 @@ export function AdPlatformsPage() {
             </div>
           </Card>
         )}
+        {setupDialog}
       </div>
     );
   }
@@ -806,72 +875,7 @@ export function AdPlatformsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Setup Modal */}
-      <Dialog open={showSetup} onOpenChange={setShowSetup}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-display">
-              Set up {setupPlatform === 'facebook' ? 'Meta' : setupPlatform === 'bing' ? 'Microsoft / Bing' : 'Google Ads'} Webhook
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Account / Integration Name *</Label>
-              <Input value={setupName} onChange={e => setSetupName(e.target.value)} placeholder="e.g. My Business Page" />
-            </div>
-
-            <div>
-              <Label>Route Leads to University</Label>
-              <Select value={setupUniId || '__none__'} onValueChange={v => setSetupUniId(v === '__none__' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="Select university..." /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Store only (no auto-push)</SelectItem>
-                  {universities.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">By default, leads arrive in All Leads. Choose a university here or create rules under All Leads → Lead automation to push them onward.</p>
-            </div>
-
-            <div>
-              <Label className="flex items-center gap-1"><Settings2 className="h-3.5 w-3.5" /> Field Mapping</Label>
-              <p className="text-xs text-muted-foreground mb-2">Map ad platform field names to your system fields</p>
-              <div className="space-y-1">
-                {Object.entries(setupMapping).map(([from, to]) => (
-                  <div key={from} className="flex items-center gap-2 text-sm">
-                    <code className="flex-1 bg-muted/50 px-2 py-1 rounded text-xs font-mono truncate">{from}</code>
-                    <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <Select value={to} onValueChange={v => setSetupMapping(prev => ({ ...prev, [from]: v }))}>
-                      <SelectTrigger className="h-8 w-[140px]"><SelectValue /></SelectTrigger>
-                      <SelectContent>{SYSTEM_FIELDS.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
-                    </Select>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removeFieldMapping(from)}>
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-2 mt-2">
-                <Input className="h-8 text-xs" placeholder="Ad field name" value={newFieldKey} onChange={e => setNewFieldKey(e.target.value)} />
-                <Select value={newFieldValue || '__pick__'} onValueChange={v => setNewFieldValue(v === '__pick__' ? '' : v)}>
-                  <SelectTrigger className="h-8 w-[140px]"><SelectValue placeholder="Map to..." /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__pick__">Select field...</SelectItem>
-                    {SYSTEM_FIELDS.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" size="sm" className="h-8" onClick={addFieldMapping}>Add</Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowSetup(false)}>Cancel</Button>
-            <Button onClick={saveIntegration} disabled={saving}>
-              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
-              Create Webhook
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {setupDialog}
     </div>
   );
 }
