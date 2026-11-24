@@ -52,7 +52,7 @@ export function LeadPreviewTable({
   rowOffset = 0,
   rowIndices,
   maskContacts = false,
-  showOutgoingRequest = true,
+  showOutgoingRequest = false,
   requiredFields = [],
 }: LeadPreviewTableProps) {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);

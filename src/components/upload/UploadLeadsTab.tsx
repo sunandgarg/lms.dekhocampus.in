@@ -532,7 +532,7 @@ export function UploadLeadsTab({
   const [batchRate, setBatchRate] = useState(() => clampUniversityNumber(selectedUniversity?.leads_per_minute, 60, 1, 100));
   const [batchConcurrency, setBatchConcurrency] = useState(() => clampUniversityNumber(selectedUniversity?.default_push_concurrency, 2, 1, 5));
   const [hasBatchSnapshot, setHasBatchSnapshot] = useState(false);
-  const [showLeadPreview, setShowLeadPreview] = useState(false);
+  const [showLeadPreview, setShowLeadPreview] = useState(true);
   const [safetyPauseReason, setSafetyPauseReason] = useState("");
   const [discussionWith, setDiscussionWith] = useState("");
   const [isBackgroundPolling, setIsBackgroundPolling] = useState(Boolean(persistedProcessing.isProcessing && persistedState.batchId));
@@ -1710,7 +1710,7 @@ export function UploadLeadsTab({
 
       setValidationErrors(errorMap);
       setShowOnlyInvalid(false);
-      setShowLeadPreview(false);
+      setShowLeadPreview(true);
 
       if (invalidLeads.length > 0) {
         setAlert({
@@ -2145,7 +2145,7 @@ export function UploadLeadsTab({
     setLeadPayloads(new Map());
     setValidationErrors(new Map());
     setShowOnlyInvalid(false);
-    setShowLeadPreview(false);
+    setShowLeadPreview(true);
     setDbDuplicates(new Set());
     setProcessedCount(0);
     setBatchId(null);
