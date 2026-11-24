@@ -645,8 +645,8 @@ export function AllLeadsPage() {
           <p className="mt-1 text-sm text-muted-foreground">Search enquiries, review university delivery, and act on selected leads.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowSources(!showSources)} aria-expanded={showSources}>
-            Sources & notes {showSources ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
+          <Button variant="outline" size="sm" onClick={() => setShowSources(true)} aria-haspopup="dialog">
+            Sources & notes
           </Button>
           {isAdmin && <Button variant="outline" size="sm" onClick={() => setShowAttribution(!showAttribution)} aria-expanded={showAttribution}>
             Source · Medium · Campaign defaults {showAttribution ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
@@ -660,7 +660,14 @@ export function AllLeadsPage() {
         </div>
       </div>
 
-      {showSources && <SourceReviewSettings onPublished={() => setAttributionVersion((value) => value + 1)} />}
+      <Dialog open={showSources} onOpenChange={setShowSources}>
+        <DialogContent className="flex max-h-[90vh] w-[min(96vw,1000px)] max-w-none flex-col gap-3 overflow-hidden p-0">
+          <DialogHeader className="border-b px-5 py-4">
+            <DialogTitle>Sources & notes</DialogTitle>
+          </DialogHeader>
+          {showSources && <SourceReviewSettings onPublished={() => setAttributionVersion((value) => value + 1)} />}
+        </DialogContent>
+      </Dialog>
       {isAdmin && showAutomation && <LeadAutomationSettings incomingExtraFields={[...new Set(leads
         .filter((lead) => lead.isInbound)
         .flatMap((lead) => Object.keys(lead.extraData || {})))].sort()} />}

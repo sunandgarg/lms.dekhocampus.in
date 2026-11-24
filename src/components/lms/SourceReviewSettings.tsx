@@ -4,7 +4,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -50,59 +49,63 @@ export function SourceReviewSettings({ onPublished }: { onPublished?: () => void
     await load();
   };
 
-  return <Card className="space-y-5 p-4 md:p-6">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h2 className="text-lg font-semibold">Sources & team notes</h2>
-        <p className="text-sm text-muted-foreground">See where leads arrived from. Published source and medium labels apply to future incoming leads.</p>
-      </div>
-      <Badge variant="outline">{sources.length} source and medium combinations</Badge>
+  return <div className="min-h-0 space-y-3 overflow-y-auto px-5 pb-5">
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+      <span>Review incoming labels and campaigns. Published changes affect new leads.</span>
+      <Badge variant="outline">{sources.length} combinations</Badge>
     </div>
-    <Input aria-label="Search sources and campaigns" placeholder="Search source, medium, connection, or campaign" value={search} onChange={(event) => setSearch(event.target.value)} />
-    <div className="max-h-[380px] space-y-2 overflow-y-auto pr-1">
-      {visible.map((item) => <button key={`${item.source}\0${item.medium}`} type="button" onClick={() => choose(item)}
-        className={`w-full rounded-lg border px-4 py-3 text-left transition-colors hover:bg-muted/60 ${selected?.source === item.source && selected?.medium === item.medium ? 'border-primary bg-primary/5' : ''}`}>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold">{item.source || 'Unspecified'}</span>
-          <Badge variant="secondary">{item.medium || 'No medium'}</Badge>
-          <span className="ml-auto text-sm font-medium">{item.leads} leads</span>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">{item.connections || 'Unknown connection'} · {item.campaigns} campaign{Number(item.campaigns) === 1 ? '' : 's'}</p>
-        {!!item.campaign_names && <p className="mt-1 truncate text-xs text-muted-foreground" title={item.campaign_names}>{item.campaign_names}</p>}
-      </button>)}
-      {!visible.length && <p className="py-6 text-center text-sm text-muted-foreground">No matching sources.</p>}
+    <Input aria-label="Search sources and campaigns" className="h-9" placeholder="Search source, medium, connection, or campaign" value={search} onChange={(event) => setSearch(event.target.value)} />
+    <div className="max-h-[40vh] overflow-auto rounded-lg border" role="region" aria-label="Source list, scroll horizontally for more columns" tabIndex={0}>
+      <table className="w-full min-w-[850px] text-sm">
+        <thead className="sticky top-0 bg-muted text-left text-xs text-muted-foreground"><tr>
+          <th className="px-3 py-2 font-medium">Source</th><th className="px-3 py-2 font-medium">Medium</th>
+          <th className="px-3 py-2 font-medium">Connection</th><th className="px-3 py-2 font-medium">Campaigns</th>
+          <th className="px-3 py-2 text-right font-medium">Leads</th><th className="px-3 py-2 text-right font-medium">Action</th>
+        </tr></thead>
+        <tbody>{visible.map((item) => <tr key={`${item.source}\0${item.medium}`}
+          className={`border-t hover:bg-muted/40 ${selected?.source === item.source && selected?.medium === item.medium ? 'bg-primary/5' : ''}`}>
+          <td className="max-w-[190px] truncate px-3 py-2 font-medium" title={item.source}>{item.source || 'Unspecified'}</td>
+          <td className="max-w-[120px] truncate px-3 py-2" title={item.medium}>{item.medium || '—'}</td>
+          <td className="max-w-[180px] truncate px-3 py-2" title={item.connections || ''}>{item.connections || '—'}</td>
+          <td className="max-w-[220px] truncate px-3 py-2" title={item.campaign_names || ''}>{item.campaign_names || `${item.campaigns} campaigns`}</td>
+          <td className="px-3 py-2 text-right tabular-nums">{item.leads}</td>
+          <td className="px-3 py-1 text-right"><Button size="sm" variant="ghost" onClick={() => choose(item)}>Edit / note</Button></td>
+        </tr>)}</tbody>
+      </table>
+      {!visible.length && <p className="py-5 text-center text-sm text-muted-foreground">No matching sources.</p>}
     </div>
-    {selected && <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
-      <div><h3 className="font-semibold">{selected.source} {selected.medium && `· ${selected.medium}`}</h3>
-        <p className="text-xs text-muted-foreground">Leave a label blank to keep the incoming value. Notes can be submitted without changing labels.</p></div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="text-sm font-medium">New source label<Input className="mt-1" value={proposedSource} onChange={(event) => setProposedSource(event.target.value)} maxLength={200} placeholder="Keep incoming source" /></label>
-        <label className="text-sm font-medium">New medium label<Input className="mt-1" value={proposedMedium} onChange={(event) => setProposedMedium(event.target.value)} maxLength={200} placeholder="Keep incoming medium" /></label>
+    {selected && <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+      <p className="text-sm font-semibold">{selected.source} {selected.medium && `· ${selected.medium}`}</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Input aria-label="New source label" value={proposedSource} onChange={(event) => setProposedSource(event.target.value)} maxLength={200} placeholder="New source (optional)" />
+        <Input aria-label="New medium label" value={proposedMedium} onChange={(event) => setProposedMedium(event.target.value)} maxLength={200} placeholder="New medium (optional)" />
       </div>
-      <label className="block text-sm font-medium">Note<Textarea className="mt-1" value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} placeholder="Why should this source be labeled this way?" /></label>
+      <Textarea aria-label="Note" className="min-h-[64px]" value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} placeholder="Note for the team (optional)" />
       <div className="flex flex-wrap gap-2">
-        <Button disabled={busy || !proposedSource.trim() && !proposedMedium.trim() && !note.trim()}
+        <Button size="sm" disabled={busy || !proposedSource.trim() && !proposedMedium.trim() && !note.trim()}
           onClick={() => act({ action: isAdmin ? 'publish' : 'submit', source: selected.source, medium: selected.medium,
             proposed_source: proposedSource, proposed_medium: proposedMedium, note })}>
-          {isAdmin ? 'Publish labels & note' : 'Send to admin for approval'}
+          {isAdmin ? 'Publish' : 'Send for approval'}
         </Button>
-        <Button variant="outline" onClick={() => setSelected(null)}>Cancel</Button>
+        <Button size="sm" variant="outline" onClick={() => setSelected(null)}>Cancel</Button>
       </div>
     </div>}
-    <div className="space-y-2">
-      <h3 className="font-semibold">Team notes & approvals</h3>
-      {reviews.map((review) => <div key={review.id} className={`rounded-lg border p-3 ${review.status === 'pending' ? 'border-amber-300 bg-amber-50/70 dark:bg-amber-950/20' : ''}`}>
-        <div className="flex flex-wrap items-center gap-2 text-sm"><strong>{review.source}</strong><span>· {review.medium || 'No medium'}</span>
-          <Badge className={review.status === 'pending' ? 'border-amber-400 bg-amber-100 text-amber-900' : ''} variant="outline">{review.status === 'pending' ? 'Pending admin approval' : review.status}</Badge>
-          <span className="ml-auto text-xs text-muted-foreground">{review.author}</span></div>
-        {(review.proposed_source || review.proposed_medium) && <p className="mt-1 text-sm">Proposed: {review.proposed_source || review.source} · {review.proposed_medium || review.medium || 'No medium'}</p>}
-        {review.note && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{review.note}</p>}
-        {isAdmin && review.status === 'pending' && <div className="mt-2 flex gap-2">
-          <Button size="sm" disabled={busy} onClick={() => act({ action: 'approve', id: review.id })}>Approve & publish</Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act({ action: 'reject', id: review.id })}>Reject</Button>
-        </div>}
-      </div>)}
-      {!reviews.length && <p className="text-sm text-muted-foreground">No notes yet.</p>}
+    <div className="space-y-2 border-t pt-3">
+      <h3 className="text-sm font-semibold">Team notes & approvals</h3>
+      <div className="max-h-44 space-y-2 overflow-y-auto">
+        {reviews.map((review) => <div key={review.id} className={`rounded-lg border px-3 py-2 text-sm ${review.status === 'pending' ? 'border-amber-300 bg-amber-50/70 dark:bg-amber-950/20' : ''}`}>
+          <div className="flex flex-wrap items-center gap-2"><strong>{review.source}</strong><span>· {review.medium || 'No medium'}</span>
+            <Badge className={review.status === 'pending' ? 'border-amber-400 bg-amber-100 text-amber-900' : ''} variant="outline">{review.status === 'pending' ? 'Pending admin approval' : review.status}</Badge>
+            <span className="ml-auto text-xs text-muted-foreground">{review.author}</span></div>
+          {(review.proposed_source || review.proposed_medium) && <p className="mt-1">Proposed: {review.proposed_source || review.source} · {review.proposed_medium || review.medium || 'No medium'}</p>}
+          {review.note && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{review.note}</p>}
+          {isAdmin && review.status === 'pending' && <div className="mt-2 flex gap-2">
+            <Button size="sm" disabled={busy} onClick={() => act({ action: 'approve', id: review.id })}>Approve</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => act({ action: 'reject', id: review.id })}>Reject</Button>
+          </div>}
+        </div>)}
+        {!reviews.length && <p className="text-sm text-muted-foreground">No notes yet.</p>}
+      </div>
     </div>
-  </Card>;
+  </div>;
 }
