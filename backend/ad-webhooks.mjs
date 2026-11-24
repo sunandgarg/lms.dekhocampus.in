@@ -52,11 +52,21 @@ function normalizeLead(raw, platform, campaign) {
     source: lead.leadSource, medium: lead.leadMedium, campaign: lead.leadCampaign };
 }
 
-async function metaCampaignName(adId) {
+export function metaTokenForPage(pageId) {
+  const id = String(pageId || '');
+  if (!/^\d{5,30}$/.test(id)) return '';
+  if (id === process.env.META_PAGE_ID) return process.env.META_ACCESS_TOKEN || '';
+  try {
+    const tokens = JSON.parse(process.env.META_PAGE_TOKENS || '{}');
+    return tokens && !Array.isArray(tokens) && typeof tokens[id] === 'string' ? tokens[id] : '';
+  } catch { return ''; }
+}
+
+async function metaCampaignName(adId, accessToken) {
   if (!/^\d{5,30}$/.test(String(adId || ''))) return '';
   try {
     const response = await fetch(`https://graph.facebook.com/v27.0/${adId}?fields=campaign%7Bid%2Cname%7D`, {
-      headers: { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(10_000), redirect: 'error',
     });
     if (!response.ok) return '';
@@ -71,9 +81,10 @@ export async function metaLeads(payload) {
   for (const entry of payload.entry) for (const change of entry.changes || []) {
     if (change.field !== 'leadgen') continue;
     const leadId = String(change.value?.leadgen_id || '');
-    if (!/^\d{5,30}$/.test(leadId) || !process.env.META_ACCESS_TOKEN) fail(503, 'Meta lead retrieval is not configured');
+    const accessToken = metaTokenForPage(entry.id);
+    if (!/^\d{5,30}$/.test(leadId) || !accessToken) fail(503, 'Meta lead retrieval is not configured for this Page');
     const response = await fetch(`https://graph.facebook.com/v27.0/${leadId}?fields=field_data%2Cad_id%2Ccampaign_id`, {
-      headers: { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(10_000), redirect: 'error',
     });
     if (!response.ok) fail(502, `Meta lead retrieval failed (${response.status})`);
@@ -91,9 +102,10 @@ export async function metaLeads(payload) {
       else if (/course|program/.test(key)) raw.course = value;
     }
     const adId = String(full.ad_id || change.value?.ad_id || '');
-    const campaignName = await metaCampaignName(adId) || String(change.value?.campaign_name || '').trim();
+    const campaignName = await metaCampaignName(adId, accessToken) || String(change.value?.campaign_name || '').trim();
     leads.push({ ...normalizeLead(raw, 'facebook', campaignName),
-      external_id: leadId, ad_id: adId, campaign_id: String(full.campaign_id || change.value?.campaign_id || '') });
+      external_id: leadId, ad_id: adId, campaign_id: String(full.campaign_id || change.value?.campaign_id || ''),
+      meta_page_id: String(entry.id) });
   }
   return leads;
 }
@@ -142,8 +154,7 @@ export async function handleAdWebhook({ db, s3, bucket, platform, key, payload, 
   if (!payload || typeof payload !== 'object') fail(400, 'Invalid webhook payload');
   if (platform === 'facebook' && Array.isArray(payload.entry)) {
     if (!verifyMetaSignature(rawBody, signature, process.env.META_APP_SECRET)) fail(401, 'Invalid Meta signature');
-    if (payload.object !== 'page' || (process.env.META_PAGE_ID &&
-      payload.entry.some((entry) => String(entry.id) !== process.env.META_PAGE_ID))) fail(400, 'Unexpected Meta Page');
+    if (payload.object !== 'page' || payload.entry.some((entry) => !metaTokenForPage(entry.id))) fail(400, 'Unexpected Meta Page');
   }
   const { setting, config } = await integrationFor(db, platform, key || payload.google_key || payload.Google_key);
   const actualPlatform = config.platform;
