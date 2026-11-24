@@ -62,6 +62,16 @@ export function metaTokenForPage(pageId) {
   } catch { return ''; }
 }
 
+export function metaSecretForPage(pageId) {
+  const id = String(pageId || '');
+  if (!/^\d{5,30}$/.test(id)) return '';
+  if (id === process.env.META_PAGE_ID) return process.env.META_APP_SECRET || '';
+  try {
+    const secrets = JSON.parse(process.env.META_PAGE_APP_SECRETS || '{}');
+    return secrets && !Array.isArray(secrets) && typeof secrets[id] === 'string' ? secrets[id] : '';
+  } catch { return ''; }
+}
+
 async function metaCampaignName(adId, accessToken) {
   if (!/^\d{5,30}$/.test(String(adId || ''))) return '';
   try {
@@ -153,7 +163,9 @@ export function googleLeads(payload, platform) {
 export async function handleAdWebhook({ db, s3, bucket, platform, key, payload, rawBody, signature }) {
   if (!payload || typeof payload !== 'object') fail(400, 'Invalid webhook payload');
   if (platform === 'facebook' && Array.isArray(payload.entry)) {
-    if (!verifyMetaSignature(rawBody, signature, process.env.META_APP_SECRET)) fail(401, 'Invalid Meta signature');
+    const pageIds = [...new Set(payload.entry.map((entry) => String(entry.id || '')))];
+    const secrets = [...new Set(pageIds.map(metaSecretForPage))];
+    if (secrets.length !== 1 || !verifyMetaSignature(rawBody, signature, secrets[0])) fail(401, 'Invalid Meta signature');
     if (payload.object !== 'page' || payload.entry.some((entry) => !metaTokenForPage(entry.id))) fail(400, 'Unexpected Meta Page');
   }
   const { setting, config } = await integrationFor(db, platform, key || payload.google_key || payload.Google_key);

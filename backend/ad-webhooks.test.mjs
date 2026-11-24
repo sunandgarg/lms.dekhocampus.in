@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { googleLeads, metaLeads, metaTokenForPage, verifyMetaSignature } from './ad-webhooks.mjs';
+import { googleLeads, metaLeads, metaSecretForPage, metaTokenForPage, verifyMetaSignature } from './ad-webhooks.mjs';
 import { normalizeGenericLead } from './generic-inbound.mjs';
 
 test('Meta webhook signature authenticates the exact request bytes', () => {
@@ -60,6 +60,18 @@ test('Meta selects a separate token for each authorized Page', () => {
     if (oldPage === undefined) delete process.env.META_PAGE_ID; else process.env.META_PAGE_ID = oldPage;
     if (oldToken === undefined) delete process.env.META_ACCESS_TOKEN; else process.env.META_ACCESS_TOKEN = oldToken;
     if (oldTokens === undefined) delete process.env.META_PAGE_TOKENS; else process.env.META_PAGE_TOKENS = oldTokens;
+  }
+});
+
+test('Meta selects a separate app secret for the other Page', () => {
+  const previous = process.env.META_PAGE_APP_SECRETS;
+  try {
+    process.env.META_PAGE_APP_SECRETS = '{"950588674803179":"my-college-app-secret"}';
+    assert.equal(metaSecretForPage('950588674803179'), 'my-college-app-secret');
+    assert.equal(metaSecretForPage('9999999999'), '');
+  } finally {
+    if (previous === undefined) delete process.env.META_PAGE_APP_SECRETS;
+    else process.env.META_PAGE_APP_SECRETS = previous;
   }
 });
 
