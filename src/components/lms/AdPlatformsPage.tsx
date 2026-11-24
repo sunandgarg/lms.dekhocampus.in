@@ -578,6 +578,10 @@ export function AdPlatformsPage() {
                     Webhook configured for <strong>{intg.account_name || intg.name}</strong>
                   </p>
                   <p className="text-xs text-muted-foreground">{intg.leads_received} leads • {intg.university_id ? `→ ${intg.university_name}` : 'All Leads inbox'}</p>
+                  <div className="w-full space-y-2 rounded-lg bg-muted/40 p-3 text-left text-xs">
+                    <div className="flex items-start gap-2"><span className="shrink-0 font-medium">Callback</span><code className="min-w-0 flex-1 break-all">{intg.webhook_url}</code><CopyBtn text={intg.webhook_url} field={`meta-url-${intg.id}`} /></div>
+                    <div className="flex items-start gap-2"><span className="shrink-0 font-medium">Verify token</span><code className="min-w-0 flex-1 break-all">{intg.webhook_key}</code><CopyBtn text={intg.webhook_key} field={`meta-key-${intg.id}`} /></div>
+                  </div>
                   <div className="flex gap-2 justify-center">
                     <Button variant="outline" size="sm">Manage</Button>
                     <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => deleteIntegration(intg.id)}>Remove</Button>
@@ -594,21 +598,6 @@ export function AdPlatformsPage() {
               </Card>
             </div>
 
-            {/* Webhook info */}
-            <Card className="p-5 space-y-3">
-              <h3 className="font-display font-semibold">Webhook Details</h3>
-              <div className="bg-muted/30 border border-border rounded-lg p-4 space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground w-24 shrink-0">Webhook Url :</span>
-                  <code className="text-sm font-mono flex-1 break-all">{cardIntegrations[0]?.webhook_url || 'Create an integration to get a URL'}</code>
-                  {cardIntegrations[0] && <CopyBtn text={cardIntegrations[0].webhook_url} field="fb-webhook-url" />}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground w-24 shrink-0">Verify Token :</span>
-                  <code className="text-sm font-mono">{cardIntegrations[0]?.webhook_key || 'Create an integration first'}</code>
-                </div>
-              </div>
-            </Card>
           </>
         )}
 
