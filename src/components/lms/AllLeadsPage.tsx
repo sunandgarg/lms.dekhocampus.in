@@ -16,6 +16,7 @@ import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loade
 import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
+import { AttributionRulesSettings } from './AttributionRulesSettings';
 import { deliveryResult, summarizeDeliveries, type LeadDelivery } from './delivery-summary';
 import { retrySources } from './retry-sources';
 import { maskContactText, maskEmail, maskMobile } from '@/utils/contactMask';
@@ -96,7 +97,7 @@ function formatDate(iso: string) {
 }
 
 function attributionSource(lead: LmsLead) {
-  return lead.extraData?.utm_source || lead.extraData?.utmSource || lead.source || '-';
+  return lead.source || lead.extraData?.utm_source || lead.extraData?.utmSource || '-';
 }
 
 function leadIdentity(lead: LmsLead) {
@@ -225,6 +226,7 @@ export function AllLeadsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showAutomation, setShowAutomation] = useState(false);
+  const [showAttribution, setShowAttribution] = useState(false);
   const fetchLeads = useCallback(
     async (_forceRefresh = false) => {
       setLoading(true);
@@ -259,7 +261,7 @@ export function AllLeadsPage() {
           mobile: tenDigitMobile(lead.mobile || ''), originalMobile: lead.mobile || '',
           city: lead.city || '', course: lead.course || '', specialization: '',
           source: lead.source || lead.connection_name || 'Generic API', campaign: lead.campaign || '',
-          medium: lead.extra_data?.utm_medium || lead.extra_data?.lead_medium || lead.extra_data?.medium || '',
+          medium: lead.extra_data?.attribution_medium || lead.extra_data?.utm_medium || lead.extra_data?.lead_medium || lead.extra_data?.medium || '',
           university: lead.batch_ids?.length ? `${lead.batch_ids.length} destinations` : 'Inbox only',
           universityId: '', status: 'Received', failReason: '', receivedAt: lead.created_at,
           apiResponse: '', retryCount: 0, batchId: '', triggerSource: lead.connection_name || 'Generic API',
@@ -640,6 +642,9 @@ export function AllLeadsPage() {
           <p className="mt-1 text-sm text-muted-foreground">Search enquiries, review university delivery, and act on selected leads.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && <Button variant="outline" size="sm" onClick={() => setShowAttribution(!showAttribution)} aria-expanded={showAttribution}>
+            Source · Medium · Campaign defaults {showAttribution ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
+          </Button>}
           {isAdmin && <Button variant="outline" size="sm" onClick={() => setShowAutomation(!showAutomation)} aria-expanded={showAutomation}>
             <Zap className="mr-2 h-4 w-4" /> Lead push automation {showAutomation ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
           </Button>}
@@ -652,6 +657,13 @@ export function AllLeadsPage() {
       {isAdmin && showAutomation && <LeadAutomationSettings incomingExtraFields={[...new Set(leads
         .filter((lead) => lead.isInbound)
         .flatMap((lead) => Object.keys(lead.extraData || {})))].sort()} />}
+      {isAdmin && showAttribution && <AttributionRulesSettings />}
+
+      <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        <span className="font-semibold text-foreground">Source</span> = where the lead came from (for example, Facebook);{' '}
+        <span className="font-semibold text-foreground">Medium</span> = channel or traffic type (for example, paid);{' '}
+        <span className="font-semibold text-foreground">Campaign</span> = the ad campaign or tracking name.
+      </div>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Lead overview">
         {[

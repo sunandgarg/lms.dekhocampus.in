@@ -3,6 +3,7 @@ import { executeRecords } from './records.mjs';
 import { saveSourceFile } from './archive.mjs';
 import { matchingInboundRules } from './inbound-routing.mjs';
 import { applyInboundFieldOverrides } from './inbound-field-overrides.mjs';
+import { applySavedAttributionRules } from './attribution-rules.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FIELDS = ['name', 'email', 'mobile', 'source', 'medium', 'campaign', 'course', 'city', 'state'];
@@ -127,6 +128,8 @@ export async function receiveGenericLead({ db, s3, bucket, token, payload, idemp
 export async function receiveCapturedLead({ db, s3, bucket, connection, payload, idempotencyKey, defaultDestinationIds = [] }) {
   if (!record(payload)) fail(400, 'Send one JSON lead object');
   const { lead, leadData, extra } = normalizeGenericLead(payload, connection);
+  await applySavedAttributionRules(db, lead, leadData);
+  extra.attribution_medium = leadData.leadMedium || '';
   const externalKey = idempotencyKey || payload.external_id || payload.lead?.external_id || '';
   if (externalKey && (typeof externalKey !== 'string' || externalKey.length > 200)) fail(400, 'Invalid idempotency key');
   const keyHash = externalKey ? hash(externalKey) : null;
