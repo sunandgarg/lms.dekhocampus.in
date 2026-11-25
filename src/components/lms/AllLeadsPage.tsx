@@ -384,15 +384,16 @@ export function AllLeadsPage() {
     if (notPushed) counts.needsAttention++;
     return counts;
   }, { inboxOnly: 0, sent: 0, needsAttention: 0 }), [grouped]);
+  const todayIndia = leadDay({ receivedAt: new Date().toISOString() } as LmsLead);
+  const showingToday = dateFrom === todayIndia && dateTo === todayIndia;
   const insights = useMemo(() => {
-    const today = leadDay({ receivedAt: new Date().toISOString() } as LmsLead);
     const delivery = { sent: 0, failed: 0, duplicate: 0, pending: 0 };
     const sourceCounts = new Map<string, number>();
     const campaignCounts = new Map<string, number>();
     let todayCount = 0;
     for (const group of grouped) {
       const lead = group.latest;
-      if (leadDay(lead) === today) todayCount++;
+      if (leadDay(lead) === todayIndia) todayCount++;
       const source = attributionSource(lead);
       sourceCounts.set(source, (sourceCounts.get(source) || 0) + 1);
       if (lead.campaign) campaignCounts.set(lead.campaign, (campaignCounts.get(lead.campaign) || 0) + 1);
@@ -407,8 +408,9 @@ export function AllLeadsPage() {
     const completed = delivery.sent + delivery.failed + delivery.duplicate;
     const highest = (values: Map<string, number>) => [...values].sort((a, b) => b[1] - a[1])[0] || ['', 0];
     return { todayCount, delivery, successRate: completed ? Math.round(delivery.sent / completed * 100) : 0,
-      topSource: highest(sourceCounts), topCampaign: highest(campaignCounts) };
-  }, [grouped]);
+      topSource: highest(sourceCounts), topCampaign: highest(campaignCounts),
+      sources: [...sourceCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])) };
+  }, [grouped, todayIndia]);
   const universityBreakdown = useMemo(() => {
     const values = new Map<string, { university: string; sent: number; failed: number; duplicate: number; pending: number; total: number }>();
     for (const group of grouped) for (const item of summarizeDeliveries(group.items).deliveries) {
@@ -771,8 +773,17 @@ export function AllLeadsPage() {
               <p className="mt-1 text-xs text-red-700/80">{insights.delivery.failed} failed · {insights.delivery.duplicate} duplicate · click for universities</p>
             </button>
             <div className="rounded-xl border bg-muted/25 p-3"><p className="text-xs font-medium text-muted-foreground">Inbox only</p><p className="mt-1 text-2xl font-bold tabular-nums">{viewSummary.inboxOnly}</p><p className="mt-1 text-xs text-muted-foreground">No university selected</p></div>
-            <div className="rounded-xl border bg-muted/25 p-3"><p className="text-xs font-medium text-muted-foreground">Received today</p><p className="mt-1 text-2xl font-bold tabular-nums">{insights.todayCount}</p><p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><TrendingUp className="h-3.5 w-3.5" /> India time</p></div>
+            <button type="button" onClick={() => { setDateFrom(todayIndia); setDateTo(todayIndia); }} className={`rounded-xl border p-3 text-left transition hover:border-primary/50 hover:shadow-sm ${showingToday ? 'border-primary bg-primary/5' : 'bg-muted/25'}`}>
+              <p className="text-xs font-medium text-muted-foreground">Received today</p><p className="mt-1 text-2xl font-bold tabular-nums">{insights.todayCount}</p><p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><TrendingUp className="h-3.5 w-3.5" /> Click for source totals · India time</p>
+            </button>
           </div>
+          {showingToday && <div className="overflow-hidden rounded-xl border border-primary/20 bg-primary/[0.02]">
+            <div className="flex items-center justify-between gap-3 border-b px-4 py-3"><div><p className="text-sm font-semibold">Today’s leads by source</p><p className="text-xs text-muted-foreground">Unique leads received today in India time.</p></div><Badge variant="secondary">{grouped.length} total</Badge></div>
+            {insights.sources.length ? <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">{insights.sources.map(([source, count]) => <button type="button" key={source}
+              onClick={() => setSourceFilter(source)} className="flex items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2.5 text-left transition hover:border-primary/50 hover:shadow-sm">
+              <span className="min-w-0 truncate text-sm font-medium" title={source}>{source}</span><Badge>{count}</Badge>
+            </button>)}</div> : <p className="px-4 py-5 text-sm text-muted-foreground">No leads were received today.</p>}
+          </div>}
           <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
             <div className="rounded-xl border p-3"><div className="flex items-center justify-between gap-2"><p className="text-sm font-semibold">University delivery</p><p className="text-xs text-muted-foreground">{insights.delivery.pending} pending</p></div>
               <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-muted" aria-label={`${insights.delivery.sent} sent, ${insights.delivery.failed} failed, ${insights.delivery.duplicate} duplicate, ${insights.delivery.pending} pending`}>
