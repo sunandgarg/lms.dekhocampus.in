@@ -231,6 +231,7 @@ export function AllLeadsPage() {
   const [showAttribution, setShowAttribution] = useState(false);
   const [showSources, setShowSources] = useState(false);
   const [showInsights, setShowInsights] = useState(true);
+  const [showUniversityBreakdown, setShowUniversityBreakdown] = useState(false);
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const [attributionVersion, setAttributionVersion] = useState(0);
   const fetchLeads = useCallback(
@@ -406,6 +407,21 @@ export function AllLeadsPage() {
     const highest = (values: Map<string, number>) => [...values].sort((a, b) => b[1] - a[1])[0] || ['', 0];
     return { todayCount, delivery, successRate: completed ? Math.round(delivery.sent / completed * 100) : 0,
       topSource: highest(sourceCounts), topCampaign: highest(campaignCounts) };
+  }, [filtered]);
+  const universityBreakdown = useMemo(() => {
+    const values = new Map<string, { university: string; sent: number; failed: number; duplicate: number; pending: number; total: number }>();
+    for (const lead of filtered) for (const item of lead.deliveries) {
+      const university = item.universities?.name || 'Unknown university';
+      const row = values.get(university) || { university, sent: 0, failed: 0, duplicate: 0, pending: 0, total: 0 };
+      const result = deliveryResult(item);
+      row.total++;
+      if (result === 'Pushed') row.sent++;
+      else if (result === 'Duplicate') row.duplicate++;
+      else if (result === 'Pending') row.pending++;
+      else row.failed++;
+      values.set(university, row);
+    }
+    return [...values.values()].sort((a, b) => b.failed - a.failed || b.sent - a.sent || a.university.localeCompare(b.university));
   }, [filtered]);
 
   const sources = useMemo(() => [...new Set(leads.map(attributionSource).filter((value) => value !== '-'))], [leads]);
@@ -728,16 +744,16 @@ export function AllLeadsPage() {
         {showInsights && <div className="space-y-4 p-4 md:p-5">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
             <button type="button" onClick={() => setStatusFilter('all')} className="rounded-xl border bg-background p-3 text-left transition hover:border-primary/50 hover:shadow-sm">
-              <p className="text-xs font-medium text-muted-foreground">All submissions</p><p className="mt-1 text-2xl font-bold tabular-nums">{totalSubmissions ?? leads.length}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{filtered.length} match current filters</p>
+              <p className="text-xs font-medium text-muted-foreground">Filtered leads</p><p className="mt-1 text-2xl font-bold tabular-nums">{filtered.length}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{totalSubmissions ?? leads.length} total in the system</p>
             </button>
-            <button type="button" onClick={() => setStatusFilter('Pushed')} className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-left transition hover:shadow-sm dark:bg-emerald-950/20">
+            <button type="button" onClick={() => { setStatusFilter('Pushed'); setShowUniversityBreakdown(true); }} className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-left transition hover:shadow-sm dark:bg-emerald-950/20">
               <p className="text-xs font-medium text-emerald-700">Sent to university</p><p className="mt-1 text-2xl font-bold tabular-nums text-emerald-700">{viewSummary.sent}</p>
-              <p className="mt-1 text-xs text-emerald-700/80">{insights.successRate}% accepted delivery rate</p>
+              <p className="mt-1 text-xs text-emerald-700/80">{insights.successRate}% accepted · click for universities</p>
             </button>
-            <button type="button" onClick={() => setStatusFilter('Failed')} className="rounded-xl border border-red-200 bg-red-50/60 p-3 text-left transition hover:shadow-sm dark:bg-red-950/20">
+            <button type="button" onClick={() => { setStatusFilter('Failed'); setShowUniversityBreakdown(true); }} className="rounded-xl border border-red-200 bg-red-50/60 p-3 text-left transition hover:shadow-sm dark:bg-red-950/20">
               <p className="flex items-center gap-1 text-xs font-medium text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> Needs attention</p><p className="mt-1 text-2xl font-bold tabular-nums text-red-700">{viewSummary.needsAttention}</p>
-              <p className="mt-1 text-xs text-red-700/80">{insights.delivery.failed} failed · {insights.delivery.duplicate} duplicate</p>
+              <p className="mt-1 text-xs text-red-700/80">{insights.delivery.failed} failed · {insights.delivery.duplicate} duplicate · click for universities</p>
             </button>
             <div className="rounded-xl border bg-muted/25 p-3"><p className="text-xs font-medium text-muted-foreground">Inbox only</p><p className="mt-1 text-2xl font-bold tabular-nums">{viewSummary.inboxOnly}</p><p className="mt-1 text-xs text-muted-foreground">No university selected</p></div>
             <div className="rounded-xl border bg-muted/25 p-3"><p className="text-xs font-medium text-muted-foreground">Received today</p><p className="mt-1 text-2xl font-bold tabular-nums">{insights.todayCount}</p><p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><TrendingUp className="h-3.5 w-3.5" /> India time</p></div>
@@ -754,6 +770,21 @@ export function AllLeadsPage() {
             </div>
             <div className="grid grid-cols-2 gap-2 rounded-xl border p-3"><div><p className="text-xs text-muted-foreground">Top source</p><p className="mt-1 truncate text-sm font-semibold" title={String(insights.topSource[0])}>{insights.topSource[0] || 'No source yet'}</p><p className="text-xs text-muted-foreground">{insights.topSource[1]} leads</p></div><div><p className="text-xs text-muted-foreground">Top campaign</p><p className="mt-1 truncate text-sm font-semibold" title={String(insights.topCampaign[0])}>{insights.topCampaign[0] || 'No campaign yet'}</p><p className="text-xs text-muted-foreground">{insights.topCampaign[1]} leads</p></div></div>
           </div>
+          <div className="flex justify-end"><Button type="button" size="sm" variant="outline" onClick={() => setShowUniversityBreakdown((value) => !value)}>
+            {showUniversityBreakdown ? 'Hide university results' : 'View results by university'}
+            {showUniversityBreakdown ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
+          </Button></div>
+          {showUniversityBreakdown && <div className="overflow-hidden rounded-xl border">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-4 py-3"><div><p className="text-sm font-semibold">University results</p><p className="text-xs text-muted-foreground">Counts use the same filters as the lead list. One lead can pass at one university and fail at another.</p></div><Badge variant="secondary">{universityBreakdown.length} universities</Badge></div>
+            {universityBreakdown.length ? <div className="divide-y overflow-x-auto">{universityBreakdown.map((row) => <button type="button" key={row.university}
+              onClick={() => { setUniversityFilter(row.university); setShowFilters(true); }} className="grid w-full grid-cols-[minmax(140px,1fr)_repeat(4,minmax(58px,auto))] items-center gap-2 px-4 py-3 text-left text-xs transition hover:bg-muted/30">
+              <span className="min-w-0"><strong className="block truncate text-sm text-foreground" title={row.university}>{row.university}</strong><span className="text-muted-foreground">{row.total} attempts · click to filter</span></span>
+              <span className="rounded-lg bg-emerald-50 px-2 py-1.5 text-center font-semibold text-emerald-700 dark:bg-emerald-950/30">{row.sent}<span className="block text-[10px] font-normal">Sent</span></span>
+              <span className="rounded-lg bg-red-50 px-2 py-1.5 text-center font-semibold text-red-700 dark:bg-red-950/30">{row.failed}<span className="block text-[10px] font-normal">Failed</span></span>
+              <span className="rounded-lg bg-amber-50 px-2 py-1.5 text-center font-semibold text-amber-700 dark:bg-amber-950/30">{row.duplicate}<span className="block text-[10px] font-normal">Duplicate</span></span>
+              <span className="rounded-lg bg-sky-50 px-2 py-1.5 text-center font-semibold text-sky-700 dark:bg-sky-950/30">{row.pending}<span className="block text-[10px] font-normal">Pending</span></span>
+            </button>)}</div> : <p className="px-4 py-5 text-sm text-muted-foreground">No university delivery attempts match the current filters.</p>}
+          </div>}
           <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground"><strong className="text-foreground">Source</strong> is where the lead came from · <strong className="text-foreground">Medium</strong> is the traffic type, such as paid · <strong className="text-foreground">Campaign</strong> is the ad or tracking name.</p>
         </div>}
       </Card>
