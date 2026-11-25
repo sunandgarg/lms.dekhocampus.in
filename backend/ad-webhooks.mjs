@@ -97,7 +97,12 @@ export async function metaLeads(payload) {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(10_000), redirect: 'error',
     });
-    if (!response.ok) fail(502, `Meta lead retrieval failed (${response.status})`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      fail(502, Number(error.error?.code) === 190
+        ? `Meta Page ${entry.id} access token expired; reconnect this Page`
+        : `Meta lead retrieval failed for Page ${entry.id} (${response.status})`);
+    }
     const full = await response.json();
     const raw = {};
     for (const field of full.field_data || []) {
@@ -170,7 +175,15 @@ export async function handleAdWebhook({ db, s3, bucket, platform, key, payload, 
   }
   const { setting, config } = await integrationFor(db, platform, key || payload.google_key || payload.Google_key);
   const actualPlatform = config.platform;
-  const leads = actualPlatform === 'facebook' ? await metaLeads(payload) : googleLeads(payload, actualPlatform);
+  let leads;
+  try { leads = actualPlatform === 'facebook' ? await metaLeads(payload) : googleLeads(payload, actualPlatform); }
+  catch (error) {
+    config.last_error = String(error.message || error).slice(0, 250);
+    config.last_error_at = new Date().toISOString();
+    await executeRecords(db, { table: 'app_settings', action: 'update', filters: [{ field: 'id', op: 'eq', value: setting.id }],
+      values: { value: JSON.stringify(config) } });
+    throw error;
+  }
   if (!leads.length || leads.length > 100) fail(400, 'Expected 1 to 100 leads');
   const results = [];
   for (const lead of leads) {
@@ -182,6 +195,8 @@ export async function handleAdWebhook({ db, s3, bucket, platform, key, payload, 
   }
   config.leads_received = Number(config.leads_received || 0) + results.filter((item) => !item.duplicate).length;
   config.last_lead_at = new Date().toISOString();
+  delete config.last_error;
+  delete config.last_error_at;
   await executeRecords(db, { table: 'app_settings', action: 'update', filters: [{ field: 'id', op: 'eq', value: setting.id }],
     values: { value: JSON.stringify(config) } });
   return { success: true, leads_received: results.length, results };

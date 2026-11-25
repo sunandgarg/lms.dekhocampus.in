@@ -100,6 +100,23 @@ test('Meta fetches another Page’s lead with that Page’s token', async () => 
   }
 });
 
+test('Meta reports an expired Page token as a reconnect error', async () => {
+  const oldTokens = process.env.META_PAGE_TOKENS;
+  const oldFetch = globalThis.fetch;
+  process.env.META_PAGE_TOKENS = '{"950588674803179":"expired-token"}';
+  globalThis.fetch = async () => ({ ok: false, status: 401,
+    json: async () => ({ error: { code: 190, message: 'Session expired' } }) });
+  try {
+    await assert.rejects(metaLeads({ entry: [{ id: '950588674803179', changes: [
+      { field: 'leadgen', value: { leadgen_id: '3456789012' } },
+    ] }] }), /access token expired; reconnect this Page/);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldTokens === undefined) delete process.env.META_PAGE_TOKENS;
+    else process.env.META_PAGE_TOKENS = oldTokens;
+  }
+});
+
 test('Google Ads published webhook shape accepts name and phone without email', () => {
   const leads = googleLeads({ lead_id: 'google-123', campaign_id: 42, is_test: true,
     user_column_data: [

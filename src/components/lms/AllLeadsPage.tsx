@@ -196,6 +196,7 @@ export function AllLeadsPage() {
   const [customRows, setCustomRows] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
+  const [totalSubmissions, setTotalSubmissions] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -235,6 +236,8 @@ export function AllLeadsPage() {
     async (_forceRefresh = false) => {
       setLoading(true);
       try {
+        const totalResult = await api.from('inbound_leads').select('id', { count: 'exact', head: true }).is('deleted_at', null);
+        if (!totalResult.error) setTotalSubmissions(totalResult.count ?? null);
         const inboundData: any[] = [];
         let inboundHasMore = false;
         for (let page = 0; page < pageCount; page++) {
@@ -698,14 +701,14 @@ export function AllLeadsPage() {
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Lead overview">
         {[
-          ['Matching submissions', filtered.length, 'text-foreground'],
+          ['Total submissions', totalSubmissions ?? leads.length, 'text-foreground'],
           ['Sent to university', viewSummary.sent, 'text-emerald-700'],
           ['Needs attention', viewSummary.needsAttention, 'text-red-700'],
           ['Inbox only', viewSummary.inboxOnly, 'text-muted-foreground'],
         ].map(([label, count, color]) => <Card key={String(label)} className="px-4 py-3 shadow-sm">
           <p className="text-xs font-medium text-muted-foreground">{label}</p>
           <p className={`mt-1 text-2xl font-bold tabular-nums ${color}`}>{count}</p>
-          {label === 'Matching submissions' && <p className="text-xs text-muted-foreground">{grouped.length} unique contacts{hasMore ? ' · older submissions not loaded' : ''}</p>}
+          {label === 'Total submissions' && <p className="text-xs text-muted-foreground">{filtered.length} matching in loaded rows · {grouped.length} contacts{hasMore ? ' · load older below' : ''}</p>}
         </Card>)}
       </div>
 

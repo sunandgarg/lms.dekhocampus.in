@@ -37,6 +37,7 @@ interface Integration {
   created_at: string;
   leads_received: number;
   last_lead_at: string | null;
+  last_error?: string;
 }
 
 interface IncomingLead {
@@ -232,13 +233,6 @@ export function AdPlatformsPage() {
             const platform = config.platform || 'facebook';
             const subtype = config.subtype || 'lead_ad';
             const functionName = platform === 'facebook' ? 'meta-ads-webhook' : 'google-ads-webhook';
-            const leadCount = (logsRes.data || []).filter(l =>
-              l.source === (platform === 'facebook' ? 'Facebook Lead Ads' : 'Google Lead Ads') &&
-              (!config.university_id || l.university_id === config.university_id)
-            ).length;
-            const lastLead = (logsRes.data || []).find(l =>
-              l.source === (platform === 'facebook' ? 'Facebook Lead Ads' : 'Google Lead Ads')
-            );
             integrationList.push({
               id: s.id, platform, subtype,
               name: config.name || `${platform} Integration`,
@@ -249,8 +243,9 @@ export function AdPlatformsPage() {
               webhook_url: getWebhookUrl(functionName, config.university_id || undefined, config.webhook_key),
               webhook_key: config.webhook_key || '',
               field_mapping: config.field_mapping || (platform === 'facebook' ? DEFAULT_FB_MAPPING : DEFAULT_GOOGLE_MAPPING),
-              created_at: s.updated_at || '', leads_received: leadCount,
-              last_lead_at: lastLead?.created_at || null,
+              created_at: s.updated_at || '', leads_received: Number(config.leads_received || 0),
+              last_lead_at: config.last_lead_at || null,
+              last_error: config.last_error || '',
             });
           } catch { /* skip */ }
         }
@@ -578,6 +573,7 @@ export function AdPlatformsPage() {
                     Webhook configured for <strong>{intg.account_name || intg.name}</strong>
                   </p>
                   <p className="text-xs text-muted-foreground">{intg.leads_received} leads • {intg.university_id ? `→ ${intg.university_name}` : 'All Leads inbox'}</p>
+                  {intg.last_error && <p role="alert" className="rounded bg-red-50 p-2 text-xs text-red-700">{intg.last_error}</p>}
                   <div className="w-full space-y-2 rounded-lg bg-muted/40 p-3 text-left text-xs">
                     <div className="flex items-start gap-2"><span className="shrink-0 font-medium">Callback</span><code className="min-w-0 flex-1 break-all">{intg.webhook_url}</code><CopyBtn text={intg.webhook_url} field={`meta-url-${intg.id}`} /></div>
                     <div className="flex items-start gap-2"><span className="shrink-0 font-medium">Verify token</span><code className="min-w-0 flex-1 break-all">{intg.webhook_key}</code><CopyBtn text={intg.webhook_key} field={`meta-key-${intg.id}`} /></div>
