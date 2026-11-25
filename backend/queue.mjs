@@ -103,6 +103,12 @@ async function finishItem(db, item, error, result) {
 export function applyDeliveryResult(batch, result) {
   const failed = !['Success', 'Duplicate', 'Cancelled'].includes(result?.status);
   batch.consecutive_fail_count = failed ? Number(batch.consecutive_fail_count || 0) + 1 : 0;
+  if (failed && result?.response) {
+    let reason = String(result.response);
+    try { const parsed = JSON.parse(reason); reason = String(parsed.message || parsed.error || reason); }
+    catch { /* Keep a plain-text partner response. */ }
+    batch.error_message = `Partner rejected lead: ${reason.replace(/\s+/g, ' ').slice(0, 300)}`;
+  }
   if (batch.consecutive_fail_count >= 25) {
     batch.status = 'paused'; batch.is_paused = true;
     batch.safety_pause_reason = '25 leads failed consecutively. Check the partner responses and discuss before continuing.';

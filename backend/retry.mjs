@@ -1,6 +1,8 @@
 import { executeRecords } from './records.mjs';
 import { processLead } from './lead-processor.mjs';
 import { saveSourceFile } from './archive.mjs';
+import { matchingInboundRules } from './inbound-routing.mjs';
+import { applyInboundFieldOverrides } from './inbound-field-overrides.mjs';
 
 function leadData(lead) {
   const data = { name: String(lead.name || ''), email: String(lead.email || ''), mobile: String(lead.mobile || ''),
@@ -27,6 +29,17 @@ export async function retryApiConfig(db, lead) {
     source = data;
   }
   return undefined;
+}
+
+export async function refreshedRetryApiConfig(db, lead, data, originalConfig) {
+  if (!lead.extra_data?.inbound_lead_id) return originalConfig;
+  const { data: university } = await executeRecords(db, { table: 'universities', select: 'id,column_mapping', single: true,
+    filters: [{ field: 'id', op: 'eq', value: lead.university_id }] });
+  if (!university) return originalConfig;
+  const rules = await matchingInboundRules(db, data, data);
+  const rule = rules.find((item) => item.destination_ids.includes(lead.university_id) && item.field_overrides?.[lead.university_id]);
+  const override = applyInboundFieldOverrides(data, data, university, rule?.field_overrides?.[lead.university_id]);
+  return override ? { ...originalConfig, ...override } : originalConfig;
 }
 
 export async function retryInboundDelivery({ db, s3, bucket, batchId, userId }) {
@@ -80,6 +93,7 @@ export async function retryLeads({ db, s3, bucket, leadIds, userId, maxRetries =
         continue;
       }
       const originalConfig = await retryApiConfig(db, lead);
+      const currentConfig = await refreshedRetryApiConfig(db, lead, data, originalConfig);
       const inboundId = lead.extra_data?.inbound_lead_id;
       if (/^[0-9a-f-]{36}$/i.test(String(inboundId || ''))) {
         const [linked] = await db.execute(`UPDATE lms_records SET data = JSON_ARRAY_INSERT(data, '$.batch_ids[0]', ?)
@@ -92,7 +106,7 @@ export async function retryLeads({ db, s3, bucket, leadIds, userId, maxRetries =
       deliveryStarted = true;
       const result = await processLead({ db, s3, bucket, userId,
         task: { universityId: lead.university_id, batchId: batch.id, sourceLabel: 'Manual Retry',
-          leadData: data, apiConfig: originalConfig,
+          leadData: data, apiConfig: currentConfig,
           retryCount: Number(lead.retry_count || 0) + 1, retryOf: lead.id } });
       await db.execute("UPDATE lms_records SET data = JSON_SET(data, '$.status', 'Retried', '$.retry_count', ?) WHERE collection = 'leads' AND id = ?",
         [Number(lead.retry_count || 0) + 1, lead.id]);

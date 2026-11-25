@@ -17,7 +17,7 @@ type Condition = { field: string; operator: string; value: string };
 type FieldDefault = { targetField: string; value: string };
 type FieldSource = { targetField: string; sourceField: string };
 type FieldTransform = { sourceField: string; equals: string; targetField: string; value: string };
-type DestinationOverrides = { defaults: FieldDefault[]; sources: FieldSource[]; transforms: FieldTransform[] };
+type DestinationOverrides = { defaults: FieldDefault[]; fixed?: FieldDefault[]; sources: FieldSource[]; transforms: FieldTransform[] };
 type Rule = { id: string; name: string; priority: number; status: 'Active' | 'Paused';
   match_mode: 'all' | 'any'; conditions: Condition[]; destination_ids: string[];
   field_overrides?: Record<string, DestinationOverrides>; triggered_count?: number };
@@ -62,6 +62,8 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
   const [destinations, setDestinations] = useState<string[]>([]);
   const [fieldOverrides, setFieldOverrides] = useState<Record<string, DestinationOverrides>>({});
   const [saving, setSaving] = useState(false);
+  const [showPartnerFields, setShowPartnerFields] = useState(false);
+  const [destinationSearch, setDestinationSearch] = useState('');
   const knownColumns = new Set(INCOMING_LEAD_COLUMNS.map((column) => column.value.toLowerCase()));
   const incomingColumns = [...INCOMING_LEAD_COLUMNS, ...incomingExtraFields
     .filter((field) => /^[\w.-]{1,100}$/.test(field) && !/key|secret|token|password|authorization/i.test(field) && !knownColumns.has(field.toLowerCase()))
@@ -92,6 +94,8 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
     setConditions(rule?.conditions?.map((condition) => ({ ...condition })) || []);
     setDestinations(rule?.destination_ids || []);
     setFieldOverrides(structuredClone(rule?.field_overrides || {}));
+    setShowPartnerFields(false);
+    setDestinationSearch('');
     setOpen(true);
   };
   const save = async () => {
@@ -111,7 +115,7 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
         status: editing?.status || 'Active', match_mode: matchMode,
         conditions: conditions.map((condition) => ({ ...condition, field: condition.field.trim(), value: condition.value.trim() })),
         destination_ids: destinations,
-        field_overrides: Object.fromEntries(destinations.map((id) => [id, fieldOverrides[id] || { defaults: [], sources: [], transforms: [] }])) };
+        field_overrides: Object.fromEntries(destinations.map((id) => [id, fieldOverrides[id] || { defaults: [], fixed: [], sources: [], transforms: [] }])) };
       const query = editing
         ? api.from('inbound_routing_rules').update(values).eq('id', editing.id)
         : api.from('inbound_routing_rules').insert(values);
@@ -153,14 +157,14 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
     return fields.filter((field) => field.name && !/key|secret|token|password|authorization/i.test(field.name) && !['college_id','__proto__','prototype','constructor'].includes(field.name.toLowerCase()));
   };
   const updateOverrides = (id: string, update: (value: DestinationOverrides) => DestinationOverrides) =>
-    setFieldOverrides((previous) => ({ ...previous, [id]: update(previous[id] || { defaults: [], sources: [], transforms: [] }) }));
+    setFieldOverrides((previous) => ({ ...previous, [id]: update(previous[id] || { defaults: [], fixed: [], sources: [], transforms: [] }) }));
 
   return <>
     <Card className="p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-semibold flex items-center gap-2"><Zap className="h-4 w-4" /> Lead push on creation</h2>
-          <p className="text-xs text-muted-foreground">Route new API and connected ad leads by city, state, course, source, campaign, or any incoming field. Set partner field values for each destination.</p>
+          <p className="text-xs text-muted-foreground">Choose a university. Every new lead goes there unless you add a condition.</p>
         </div>
         <Button size="sm" onClick={() => show(null)}><Plus className="h-4 w-4 mr-1" /> New rule</Button>
       </div>
@@ -187,13 +191,10 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{editing ? 'Edit lead push on creation' : 'New lead push on creation'}</DialogTitle></DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-[1fr_6rem] gap-3">
-            <div><Label>Rule name</Label><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Delhi MBA leads" /></div>
-            <div><Label>Priority</Label><Input type="number" min="1" value={priority} onChange={(event) => setPriority(Number(event.target.value))} /></div>
-          </div>
+          <div><Label>Rule name</Label><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Send new leads to LPU" /></div>
           <div>
-            <Label>Conditions</Label>
-            <p className="text-xs text-muted-foreground">No conditions means every new lead. Add conditions to route selected leads only.</p>
+            <Label>When should it run?</Label>
+            <p className="text-xs text-muted-foreground">{conditions.length ? 'Only leads matching these conditions' : 'Every new lead from API or connected ads'}</p>
             {conditions.length > 1 && <Select value={matchMode} onValueChange={(value) => setMatchMode(value as 'all' | 'any')}>
               <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="all">Match all conditions</SelectItem><SelectItem value="any">Match any condition</SelectItem></SelectContent>
@@ -219,24 +220,34 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
             </Button>
           </div>
           <div>
-            <Label>Push matching leads to</Label>
-            <ScrollArea className="h-44 border rounded p-2 mt-1"><div className="space-y-1">{universities.map((university) =>
+            <Label>Send to university</Label>
+            <Input className="mt-1" aria-label="Search universities" placeholder="Search universities" value={destinationSearch} onChange={(event) => setDestinationSearch(event.target.value)} />
+            <ScrollArea className="h-32 border rounded p-2 mt-1"><div className="space-y-1">{universities.filter((university) =>
+              destinations.includes(university.id) || university.name.toLowerCase().includes(destinationSearch.trim().toLowerCase())).map((university) =>
               <label key={university.id} className="flex items-center gap-2 text-sm cursor-pointer">
                 <Checkbox checked={destinations.includes(university.id)} onCheckedChange={(checked) =>
                   setDestinations((prev) => checked ? [...prev, university.id] : prev.filter((id) => id !== university.id))} />
                 {university.name}
               </label>)}</div></ScrollArea>
+            {!!destinations.length && <p className="mt-1 text-xs text-muted-foreground">Selected: {destinationNames(destinations)}</p>}
           </div>
+          <Button type="button" variant="outline" className="w-full" onClick={() => setShowPartnerFields((value) => !value)}>
+            {showPartnerFields ? 'Hide partner field settings' : 'Customize partner field values (optional)'}
+          </Button>
+          {showPartnerFields && <div className="space-y-4">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">Rule priority
+              <Input className="h-8 w-20" type="number" min="1" value={priority} onChange={(event) => setPriority(Number(event.target.value))} />
+            </label>
           {destinations.map((id) => {
             const university = universities.find((item) => item.id === id);
             if (!university) return null;
             const fields = partnerFields(university);
-            const override = fieldOverrides[id] || { defaults: [], sources: [], transforms: [] };
+            const override = fieldOverrides[id] || { defaults: [], fixed: [], sources: [], transforms: [] };
             return <div key={id} className="space-y-3 rounded-lg border p-4">
               <div><h3 className="font-semibold">{university.name} · partner fields</h3>
-                <p className="text-xs text-muted-foreground">Use the fields saved in this university integration. Choose an incoming field, set a fallback if it is empty, or add a conditional value. Credential fields are hidden.</p></div>
+                <p className="text-xs text-muted-foreground">Always send replaces the lead value for this university. Fallback is used only when the lead value is blank.</p></div>
               {fields.length ? <div className="max-h-64 overflow-auto rounded-md border">
-                <table className="w-full text-sm"><thead className="bg-muted/50 text-left text-xs"><tr><th className="p-2">Partner field</th><th className="p-2">Saved mapping / value</th><th className="p-2">Use incoming field</th><th className="p-2">Fallback value</th></tr></thead>
+                <table className="w-full min-w-[850px] text-sm"><thead className="bg-muted/50 text-left text-xs"><tr><th className="p-2">Partner field</th><th className="p-2">Saved mapping / value</th><th className="p-2">Use incoming field</th><th className="p-2">Fallback if blank</th><th className="p-2">Always send</th></tr></thead>
                   <tbody>{fields.map((field) => <tr key={field.name} className="border-t"><td className="p-2 font-medium">{field.label}<span className="block text-xs font-normal text-muted-foreground">{field.name}</span></td>
                     <td className="p-2 text-xs text-muted-foreground">{field.source}{field.saved ? ` · ${field.saved}` : ''}</td>
                     <td className="p-2"><Input list="lead-automation-fields" aria-label={`Incoming field for ${field.name} at ${university.name}`} placeholder={field.source === 'lead_data' || field.source === 'static' || field.source === 'dynamic' ? 'Use saved mapping' : field.source}
@@ -248,6 +259,11 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
                       value={override.defaults.find((item) => item.targetField === field.name)?.value || ''}
                       onChange={(event) => updateOverrides(id, (current) => ({ ...current,
                         defaults: [...current.defaults.filter((item) => item.targetField !== field.name),
+                          ...(event.target.value ? [{ targetField: field.name, value: event.target.value }] : [])] }))} /></td>
+                    <td className="p-2"><Input aria-label={`Always send ${field.name} for ${university.name}`} placeholder="Use lead value" maxLength={1000}
+                      value={override.fixed?.find((item) => item.targetField === field.name)?.value || ''}
+                      onChange={(event) => updateOverrides(id, (current) => ({ ...current,
+                        fixed: [...(current.fixed || []).filter((item) => item.targetField !== field.name),
                           ...(event.target.value ? [{ targetField: field.name, value: event.target.value }] : [])] }))} /></td></tr>)}</tbody>
                 </table></div> : <p className="text-xs text-muted-foreground">Add partner payload fields in the university integration before setting field values here.</p>}
               {!!fields.length && <div className="space-y-2"><div><h4 className="text-sm font-semibold">Conditional field values</h4><p className="text-xs text-muted-foreground">Choose an incoming All Leads column. Leave Equals blank to match an empty or missing value. The first matching row for a partner field wins.</p></div>
@@ -273,7 +289,7 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
                 <Button variant="outline" size="sm" disabled={override.transforms.length >= 50} onClick={() => updateOverrides(id, (current) => ({ ...current, transforms: [...current.transforms, { sourceField: '', equals: '', targetField: '', value: '' }] }))}><Plus className="mr-1 h-4 w-4" /> Add condition</Button>
               </div>}
             </div>;
-          })}
+          })}</div>}
         </div>
         <DialogFooter><Button onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save rule'}</Button></DialogFooter>
       </DialogContent>

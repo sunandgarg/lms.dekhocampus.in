@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { retryApiConfig, retryInboundDelivery } from './retry.mjs';
+import { refreshedRetryApiConfig, retryApiConfig, retryInboundDelivery } from './retry.mjs';
 
 const batchId = '5fcce38a-97ba-4f97-a457-d8ab5fd73173';
 const inboundId = '303670cf-d907-4d52-afb7-876935cb2a3a';
@@ -24,4 +24,24 @@ test('repeat retry keeps the original destination field mapping', async () => {
     return [[{ data: parent }]];
   } };
   assert.deepEqual(await retryApiConfig(db, retry), mapping);
+});
+
+test('incoming retry uses the current university routing correction', async () => {
+  const universityId = '53a88ee5-4230-4d12-b536-22a383c45df9';
+  const db = { execute: async (_sql, values) => {
+    if (values[0] === 'universities') return [[{ data: { id: universityId, column_mapping: {
+      __field_source: JSON.stringify({ fieldName: 'source', sourceType: 'lead_data', sourceKey: 'source' }),
+    } } }]];
+    if (values[0] === 'inbound_routing_rules') return [[{ data: { status: 'Active', priority: 1,
+      conditions: [], destination_ids: [universityId], field_overrides: { [universityId]: {
+        fixed: [{ targetField: 'source', value: 'dekhocampus' }],
+      } },
+    } }]];
+    return [[]];
+  } };
+  const original = { columnMapping: { __field_source: JSON.stringify({ fieldName: 'source', sourceType: 'lead_data', sourceKey: 'source' }) } };
+  const updated = await refreshedRetryApiConfig(db, { university_id: universityId, extra_data: { inbound_lead_id: inboundId } },
+    { source: 'Facebook Lead Ads' }, original);
+  assert.equal(JSON.parse(updated.columnMapping.__field_source).staticValue, 'dekhocampus');
+  assert.equal(updated.apiType, undefined);
 });

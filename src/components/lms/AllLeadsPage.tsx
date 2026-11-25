@@ -229,6 +229,7 @@ export function AllLeadsPage() {
   const [showAutomation, setShowAutomation] = useState(false);
   const [showAttribution, setShowAttribution] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const [attributionVersion, setAttributionVersion] = useState(0);
   const fetchLeads = useCallback(
     async (_forceRefresh = false) => {
@@ -547,6 +548,17 @@ export function AllLeadsPage() {
     return <span className={map[s] || "badge-info"}>{s}</span>;
   };
 
+  const loadFailureReason = async (batchId: string) => {
+    setFailureReasons((current) => ({ ...current, [batchId]: 'Loading reason…' }));
+    const { data, error } = await api.from('leads').select('api_response,status')
+      .eq('batch_id', batchId).in('status', ['Fail', 'failed']).order('processed_at', { ascending: false }).limit(1);
+    if (error) { setFailureReasons((current) => ({ ...current, [batchId]: 'Could not load the partner response.' })); return; }
+    let reason = String(data?.[0]?.api_response || 'No partner response was recorded.');
+    try { const parsed = JSON.parse(reason); reason = String(parsed.message || parsed.error || reason); }
+    catch { /* The partner returned plain text. */ }
+    setFailureReasons((current) => ({ ...current, [batchId]: reason.slice(0, 300) }));
+  };
+
   const deliveryList = (deliveries: LeadDelivery[]) => deliveries.length ? (
     <div className="max-h-80 divide-y overflow-y-auto">
       {deliveries.map((batch) => {
@@ -560,7 +572,12 @@ export function AllLeadsPage() {
               <strong className="break-words text-foreground">{batch.universities?.name || 'University'}</strong>
               <span className={`shrink-0 font-semibold ${color}`}>{result}</span>
             </div>
-            {batch.error_message && <p className="mt-1 break-words text-xs text-muted-foreground">{batch.error_message}</p>}
+            {batch.error_message && <p className="mt-1 break-words text-xs text-muted-foreground">{isAdmin ? batch.error_message : maskContactText(batch.error_message)}</p>}
+            {!batch.error_message && result === 'Failed' && <div className="mt-1 text-xs">
+              {failureReasons[batch.id]
+                ? <p className="break-words text-muted-foreground">{isAdmin ? failureReasons[batch.id] : maskContactText(failureReasons[batch.id])}</p>
+                : <Button type="button" size="sm" variant="link" className="h-auto p-0 text-xs" onClick={() => void loadFailureReason(batch.id)}>Why failed?</Button>}
+            </div>}
             {batch.isInbound && Number(batch.fail_count || 0) > 0 && <Button type="button" variant="outline" size="sm"
               className="mt-2 h-8 border-red-200 text-red-700 hover:bg-red-50" disabled={retryDiscovering || retryRunning}
               onClick={() => handleRetryDelivery(batch)}>

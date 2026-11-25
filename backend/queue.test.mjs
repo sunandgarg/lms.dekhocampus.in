@@ -14,6 +14,12 @@ test('25 consecutive failures pause a batch; a success resets the streak', () =>
   assert.match(batch.safety_pause_reason, /25 leads failed/);
 });
 
+test('a failed partner response gives All Leads a readable reason', () => {
+  const batch = { status: 'processing', consecutive_fail_count: 0 };
+  applyDeliveryResult(batch, { status: 'Fail', response: '{"status":"Fail","message":"Invalid Source"}' });
+  assert.equal(batch.error_message, 'Partner rejected lead: Invalid Source');
+});
+
 test('a duplicate also resets the consecutive failure streak', () => {
   const batch = { status: 'processing', is_paused: false };
   for (let index = 0; index < 24; index++) applyDeliveryResult(batch, { status: 'Fail' });

@@ -72,6 +72,7 @@ export function applyInboundFieldOverrides(leadData, payload, university, settin
   if (!settings || typeof settings !== 'object' || !fields.size) return null;
   const raw = payload?.lead && typeof payload.lead === 'object' ? payload.lead : payload;
   const defaults = Array.isArray(settings.defaults) ? settings.defaults.slice(0, 50) : [];
+  const fixed = Array.isArray(settings.fixed) ? settings.fixed.slice(0, 50) : [];
   const sources = Array.isArray(settings.sources) ? settings.sources.slice(0, 50) : [];
   const transforms = Array.isArray(settings.transforms) ? settings.transforms.slice(0, 50) : [];
   const nextMapping = { ...mapping };
@@ -88,8 +89,9 @@ export function applyInboundFieldOverrides(leadData, payload, university, settin
       typeof item.equals === 'string' && typeof item.value === 'string' && item.value.trim() &&
       String(readPath(leadData, item.sourceField) ?? readPath(raw, item.sourceField) ?? '').trim().toLowerCase() === item.equals.trim().toLowerCase());
     const fallback = defaults.find((item) => item?.targetField === target && typeof item.value === 'string' && item.value.trim());
+    const always = fixed.find((item) => item?.targetField === target && typeof item.value === 'string' && item.value.trim());
     const existing = readPath(leadData, sourceKey);
-    const value = transform?.value || (existing == null || String(existing).trim() === '' || !source && definition.config.sourceType === 'static' ? fallback?.value : '');
+    const value = always?.value || transform?.value || (existing == null || String(existing).trim() === '' || !source && definition.config.sourceType === 'static' ? fallback?.value : '');
     if (!value || value.length > 1000) continue;
     if (definition.key) nextMapping[definition.key] = JSON.stringify({ ...definition.config, sourceType: 'static', staticValue: value });
     else nextMapping[`__static_${target}`] = value;

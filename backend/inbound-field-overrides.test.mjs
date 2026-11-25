@@ -24,6 +24,16 @@ test('route field values use a condition, then a fallback, without changing the 
   assert.equal(buildPayload(second, { ...config, columnMapping: secondConfig.columnMapping }).payload.program, 'BTech');
 });
 
+test('an always-send value replaces a nonempty lead field for this route only', () => {
+  const configured = { column_mapping: { __field_source: JSON.stringify({ fieldName: 'source', sourceType: 'lead_data', sourceKey: 'source' }) } };
+  const lead = { source: 'Facebook Lead Ads' };
+  const changed = applyInboundFieldOverrides(lead, lead, configured, {
+    fixed: [{ targetField: 'source', value: 'dekhocampus' }], defaults: [{ targetField: 'source', value: 'fallback' }],
+  });
+  assert.equal(buildPayload(lead, { apiType: 'generic', columnMapping: changed.columnMapping }).payload.source, 'dekhocampus');
+  assert.equal(lead.source, 'Facebook Lead Ads');
+});
+
 test('route overrides cannot create new partner fields or replace credentials', () => {
   const lead = { name: 'A' };
   const changed = applyInboundFieldOverrides(lead, lead, university, { defaults: [
