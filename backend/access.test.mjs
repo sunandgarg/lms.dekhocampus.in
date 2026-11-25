@@ -37,6 +37,7 @@ test('team users see incoming lead data without stored credential fields', async
   assert.equal(result.data[0].name, 'Sunand Garg');
   assert.equal(result.data[0].email, 's******g@gmail.com');
   assert.equal(result.data[0].mobile, '8***4');
+  assert.match(result.data[0].contact_identity, /^[a-f0-9]{64}$/);
   assert.deepEqual(result.data[0].extra_data, { city: 'Noida', original_mobile: '8***4' });
 });
 

@@ -44,6 +44,7 @@ export interface LmsLead {
   batchId: string;
   triggerSource: string;
   isInbound?: boolean;
+  identityKey?: string;
   destinationCount?: number;
   batchIds?: string[];
   extraData?: Record<string, string>;
@@ -102,6 +103,7 @@ function attributionSource(lead: LmsLead) {
 }
 
 function leadIdentity(lead: LmsLead) {
+  if (lead.identityKey) return lead.identityKey;
   const email = lead.email.trim().toLowerCase();
   const mobile = lead.mobile.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
   return email && mobile ? `${email}|${mobile}` : lead.id;
@@ -196,7 +198,6 @@ export function AllLeadsPage() {
   const [customRows, setCustomRows] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
-  const [totalSubmissions, setTotalSubmissions] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -230,7 +231,7 @@ export function AllLeadsPage() {
   const [showAutomation, setShowAutomation] = useState(false);
   const [showAttribution, setShowAttribution] = useState(false);
   const [showSources, setShowSources] = useState(false);
-  const [showInsights, setShowInsights] = useState(true);
+  const [showInsights, setShowInsights] = useState(false);
   const [showUniversityBreakdown, setShowUniversityBreakdown] = useState(false);
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const [attributionVersion, setAttributionVersion] = useState(0);
@@ -238,8 +239,6 @@ export function AllLeadsPage() {
     async (_forceRefresh = false) => {
       setLoading(true);
       try {
-        const totalResult = await api.from('inbound_leads').select('id', { count: 'exact', head: true }).is('deleted_at', null);
-        if (!totalResult.error) setTotalSubmissions(totalResult.count ?? null);
         const inboundData: any[] = [];
         let inboundHasMore = false;
         for (let page = 0; page < pageCount; page++) {
@@ -275,6 +274,7 @@ export function AllLeadsPage() {
           universityId: '', status: 'Received', failReason: '', receivedAt: lead.created_at,
           apiResponse: '', retryCount: 0, batchId: '', triggerSource: lead.connection_name || 'Generic API',
           isInbound: true, destinationCount: lead.batch_ids?.length || 0,
+          identityKey: lead.contact_identity || '',
           batchIds: lead.batch_ids || [],
           extraData: lead.extra_data || {},
           matchedRules: lead.matched_rules || [],
@@ -300,11 +300,11 @@ export function AllLeadsPage() {
   const repeatKeys = useMemo(() => {
     const counts = new Map<string, number>();
     for (const lead of leads.filter((item) => item.isInbound)) {
-      const key = isAdmin ? leadIdentity(lead) : lead.id;
+      const key = leadIdentity(lead);
       if (key !== lead.id) counts.set(key, (counts.get(key) || 0) + 1);
     }
     return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));
-  }, [leads, isAdmin]);
+  }, [leads]);
 
   const filtered = useMemo(() => {
     const result = leads.filter((l) => {
@@ -313,7 +313,7 @@ export function AllLeadsPage() {
         l.triggerSource, ...Object.entries(l.extraData || {}).flat(),
         ...l.deliveries.flatMap((batch) => [batch.universities?.name || '', deliveryResult(batch)])]))
         return false;
-      if (segment === 'repeat' ? !repeatKeys.has(isAdmin ? leadIdentity(l) : l.id) : segment !== 'all' && leadChannel(l) !== segment) return false;
+      if (segment === 'repeat' ? !repeatKeys.has(leadIdentity(l)) : segment !== 'all' && leadChannel(l) !== segment) return false;
       if (statusFilter !== "all" && l.status !== statusFilter &&
           !l.deliveries.some((batch) => deliveryResult(batch) === statusFilter)) return false;
       if (sourceFilter !== "all" && attributionSource(l) !== sourceFilter) return false;
@@ -339,20 +339,20 @@ export function AllLeadsPage() {
     });
     return result;
   }, [leads, repeatKeys, search, segment, statusFilter, sourceFilter, mediumFilter, campaignFilter,
-    courseFilter, universityFilter, cityFilter, stateFilter, contactFilter, dateFrom, dateTo, sortCol, sortDir, isAdmin]);
+    courseFilter, universityFilter, cityFilter, stateFilter, contactFilter, dateFrom, dateTo, sortCol, sortDir]);
 
   // A person is grouped only when both contact identifiers agree. Every submission remains available below the row.
   const grouped = useMemo(() => {
     const groups = new Map<string, LmsLead[]>();
     for (const lead of filtered) {
-      const key = isAdmin ? leadIdentity(lead) : lead.id;
+      const key = leadIdentity(lead);
       groups.set(key, [...(groups.get(key) || []), lead]);
     }
     return [...groups.entries()].map(([key, items]) => {
       const history = [...items].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
       return { key, items: history, latest: history[0], firstAt: history[history.length - 1].receivedAt };
     });
-  }, [filtered, isAdmin]);
+  }, [filtered]);
 
   const totalPages = Math.max(1, Math.ceil(grouped.length / rowsPerPage));
   const safePage = Math.min(currentPage, totalPages);
@@ -372,7 +372,7 @@ export function AllLeadsPage() {
   };
 
   const segmentCounts = useMemo(() => {
-    const count = (items: LmsLead[]) => items.length;
+    const count = (items: LmsLead[]) => new Set(items.map(leadIdentity)).size;
     return { all: count(leads), facebook: count(leads.filter((lead) => leadChannel(lead) === 'facebook')),
       google: count(leads.filter((lead) => leadChannel(lead) === 'google')),
       other: count(leads.filter((lead) => leadChannel(lead) === 'other')), repeat: repeatKeys.size };
@@ -390,12 +390,13 @@ export function AllLeadsPage() {
     const sourceCounts = new Map<string, number>();
     const campaignCounts = new Map<string, number>();
     let todayCount = 0;
-    for (const lead of filtered) {
+    for (const group of grouped) {
+      const lead = group.latest;
       if (leadDay(lead) === today) todayCount++;
       const source = attributionSource(lead);
       sourceCounts.set(source, (sourceCounts.get(source) || 0) + 1);
       if (lead.campaign) campaignCounts.set(lead.campaign, (campaignCounts.get(lead.campaign) || 0) + 1);
-      for (const item of lead.deliveries) {
+      for (const item of summarizeDeliveries(group.items).deliveries) {
         const result = deliveryResult(item);
         if (result === 'Pushed') delivery.sent++;
         else if (result === 'Duplicate') delivery.duplicate++;
@@ -407,10 +408,10 @@ export function AllLeadsPage() {
     const highest = (values: Map<string, number>) => [...values].sort((a, b) => b[1] - a[1])[0] || ['', 0];
     return { todayCount, delivery, successRate: completed ? Math.round(delivery.sent / completed * 100) : 0,
       topSource: highest(sourceCounts), topCampaign: highest(campaignCounts) };
-  }, [filtered]);
+  }, [grouped]);
   const universityBreakdown = useMemo(() => {
     const values = new Map<string, { university: string; sent: number; failed: number; duplicate: number; pending: number; total: number }>();
-    for (const lead of filtered) for (const item of lead.deliveries) {
+    for (const group of grouped) for (const item of summarizeDeliveries(group.items).deliveries) {
       const university = item.universities?.name || 'Unknown university';
       const row = values.get(university) || { university, sent: 0, failed: 0, duplicate: 0, pending: 0, total: 0 };
       const result = deliveryResult(item);
@@ -422,7 +423,7 @@ export function AllLeadsPage() {
       values.set(university, row);
     }
     return [...values.values()].sort((a, b) => b.failed - a.failed || b.sent - a.sent || a.university.localeCompare(b.university));
-  }, [filtered]);
+  }, [grouped]);
 
   const sources = useMemo(() => [...new Set(leads.map(attributionSource).filter((value) => value !== '-'))], [leads]);
   const media = useMemo(() => [...new Set(leads.map((lead) => lead.medium).filter(Boolean))], [leads]);
@@ -684,7 +685,21 @@ export function AllLeadsPage() {
   };
   const activeFilterCount = [statusFilter !== 'all', sourceFilter !== 'all', mediumFilter !== 'all',
     !!campaignFilter, courseFilter !== 'all', universityFilter !== 'all', cityFilter !== 'all',
-    stateFilter !== 'all', contactFilter !== 'all', !!dateFrom, !!dateTo].filter(Boolean).length;
+    stateFilter !== 'all', contactFilter !== 'all', !!dateFrom, !!dateTo, segment !== 'all'].filter(Boolean).length;
+  const activeFilters = [
+    segment !== 'all' && { label: 'Source group', value: segment === 'facebook' ? 'Meta / Facebook' : segment === 'google' ? 'Google' : segment === 'repeat' ? 'Repeat enquiries' : 'Other sources', clear: () => setSegment('all') },
+    statusFilter !== 'all' && { label: 'Status', value: statusFilter, clear: () => setStatusFilter('all') },
+    sourceFilter !== 'all' && { label: 'Source', value: sourceFilter, clear: () => setSourceFilter('all') },
+    mediumFilter !== 'all' && { label: 'Medium', value: mediumFilter, clear: () => setMediumFilter('all') },
+    campaignFilter && { label: 'Campaign', value: campaignFilter, clear: () => setCampaignFilter('') },
+    courseFilter !== 'all' && { label: 'Course', value: courseFilter, clear: () => setCourseFilter('all') },
+    universityFilter !== 'all' && { label: 'University', value: universityFilter, clear: () => setUniversityFilter('all') },
+    stateFilter !== 'all' && { label: 'State', value: stateFilter, clear: () => setStateFilter('all') },
+    cityFilter !== 'all' && { label: 'City', value: cityFilter, clear: () => setCityFilter('all') },
+    contactFilter !== 'all' && { label: 'Contact', value: contactFilter === 'both' ? 'Email and mobile' : contactFilter === 'email' ? 'Has email' : 'Has mobile', clear: () => setContactFilter('all') },
+    dateFrom && { label: 'From', value: dateFrom, clear: () => setDateFrom('') },
+    dateTo && { label: 'To', value: dateTo, clear: () => setDateTo('') },
+  ].filter(Boolean) as { label: string; value: string; clear: () => void }[];
   const detailField = (_lead: LmsLead, label: string, value: unknown) => (
     <div className="min-w-0" key={label}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -739,13 +754,13 @@ export function AllLeadsPage() {
           onClick={() => setShowInsights((value) => !value)} aria-expanded={showInsights}>
           <span className="flex min-w-0 items-center gap-3"><span className="rounded-xl bg-primary/10 p-2 text-primary"><BarChart3 className="h-5 w-5" /></span>
             <span><span className="block font-semibold">Lead performance</span><span className="block text-xs text-muted-foreground">Live view of the loaded leads · responds to your filters</span></span></span>
-          <span className="flex items-center gap-2"><Badge variant="secondary">{filtered.length} matching</Badge>{showInsights ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+          <span className="flex items-center gap-2"><Badge variant="secondary">{grouped.length} leads</Badge>{showInsights ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
         </button>
         {showInsights && <div className="space-y-4 p-4 md:p-5">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
             <button type="button" onClick={() => setStatusFilter('all')} className="rounded-xl border bg-background p-3 text-left transition hover:border-primary/50 hover:shadow-sm">
-              <p className="text-xs font-medium text-muted-foreground">Filtered leads</p><p className="mt-1 text-2xl font-bold tabular-nums">{filtered.length}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{totalSubmissions ?? leads.length} total in the system</p>
+              <p className="text-xs font-medium text-muted-foreground">Unique leads</p><p className="mt-1 text-2xl font-bold tabular-nums">{grouped.length}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Same email + mobile counted once</p>
             </button>
             <button type="button" onClick={() => { setStatusFilter('Pushed'); setShowUniversityBreakdown(true); }} className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-left transition hover:shadow-sm dark:bg-emerald-950/20">
               <p className="text-xs font-medium text-emerald-700">Sent to university</p><p className="mt-1 text-2xl font-bold tabular-nums text-emerald-700">{viewSummary.sent}</p>
@@ -804,24 +819,27 @@ export function AllLeadsPage() {
           </div>
           <div className="flex flex-col gap-2 md:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input aria-label="Search anything in leads" placeholder="Search name, email, mobile, campaign or city" value={search} onChange={(e) => setSearch(e.target.value)} className="h-10 bg-background pl-10" />
-          </div>
-            <Select value={segment} onValueChange={setSegment}><SelectTrigger aria-label="Lead source group" className="h-10 w-full md:w-56"><SelectValue /></SelectTrigger><SelectContent>
-              <SelectItem value="all">All sources ({segmentCounts.all})</SelectItem>
-              <SelectItem value="facebook">Meta / Facebook ({segmentCounts.facebook})</SelectItem>
-              <SelectItem value="google">Google ({segmentCounts.google})</SelectItem>
-              <SelectItem value="other">Other sources ({segmentCounts.other})</SelectItem>
-              {isAdmin && <SelectItem value="repeat">Repeat enquiries ({segmentCounts.repeat})</SelectItem>}
-            </SelectContent></Select>
-          </div>
-          <div className="flex flex-wrap gap-1" aria-label="Filter by delivery status">
-              {[['all','All'],['Received','Received'],['Failed','Needs attention'],['Pushed','Pushed']].map(([value,label]) =>
-                <Button key={value} size="sm" variant={statusFilter === value ? 'default' : 'ghost'} onClick={() => setStatusFilter(value)}>{label}</Button>)}
-          </div>
+          </div></div>
+          {(search.trim() || activeFilters.length > 0) && <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/35 px-3 py-2" aria-label="Applied filters">
+            <span className="text-xs font-semibold text-muted-foreground">Showing:</span>
+            {search.trim() && <Badge variant="secondary" className="gap-1.5">Search: {search.trim()}<button type="button" aria-label="Clear search" onClick={() => setSearch('')}><X className="h-3 w-3" /></button></Badge>}
+            {activeFilters.map((filter) => <Badge key={`${filter.label}-${filter.value}`} variant="secondary" className="gap-1.5">
+              {filter.label}: {filter.value}<button type="button" aria-label={`Clear ${filter.label} filter`} onClick={filter.clear}><X className="h-3 w-3" /></button>
+            </Badge>)}
+            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={clearFilters}>Clear all</Button>
+          </div>}
           {showFilters && <div className="rounded-xl border bg-muted/25 p-3 md:p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold">Refine your lead list</p>
               <Button variant="ghost" size="sm" onClick={clearFilters}><X className="mr-2 h-4 w-4" /> Clear all</Button></div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <section className="space-y-2 rounded-lg border bg-background p-3"><h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Acquisition</h3>
+                <Select value={segment} onValueChange={setSegment}><SelectTrigger aria-label="Lead source group"><SelectValue /></SelectTrigger><SelectContent>
+                  <SelectItem value="all">All source groups ({segmentCounts.all})</SelectItem>
+                  <SelectItem value="facebook">Meta / Facebook ({segmentCounts.facebook})</SelectItem>
+                  <SelectItem value="google">Google ({segmentCounts.google})</SelectItem>
+                  <SelectItem value="other">Other sources ({segmentCounts.other})</SelectItem>
+                  {isAdmin && <SelectItem value="repeat">Repeat enquiries ({segmentCounts.repeat})</SelectItem>}
+                </SelectContent></Select>
                 <Select value={sourceFilter} onValueChange={setSourceFilter}><SelectTrigger aria-label="Source filter"><SelectValue placeholder="Source" /></SelectTrigger><SelectContent><SelectItem value="all">All sources</SelectItem>{sources.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
                 <Select value={mediumFilter} onValueChange={setMediumFilter}><SelectTrigger aria-label="Medium filter"><SelectValue placeholder="Medium" /></SelectTrigger><SelectContent><SelectItem value="all">All media</SelectItem>{media.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
                 <Input aria-label="Campaign filter" list="all-leads-campaigns" placeholder="Campaign contains..." value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)} />

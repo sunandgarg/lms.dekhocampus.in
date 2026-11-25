@@ -1,6 +1,7 @@
 import { executeRecords } from './records.mjs';
 import { redactPartnerMapping, sensitivePartnerField } from './inbound-field-overrides.mjs';
 import { maskContactData } from './mask-contact.mjs';
+import { createHash } from 'node:crypto';
 
 const CONFIG_READ = new Set([
   'universities', 'programs', 'state_cities', 'course_specializations',
@@ -60,9 +61,17 @@ function hideCredentials(result) {
 }
 
 function hideLeadSecrets(result) {
-  const strip = (row) => row?.extra_data && typeof row.extra_data === 'object'
-    ? { ...row, extra_data: Object.fromEntries(Object.entries(row.extra_data)
-      .filter(([key]) => !/(?:api.?key|access.?key|secret|token|password|authorization|(?:^|[_-])key(?:$|[_-]))/i.test(key))) } : row;
+  const strip = (row) => {
+    if (!row || typeof row !== 'object') return row;
+    const email = String(row.email || '').trim().toLowerCase();
+    const mobile = String(row.mobile || '').replace(/\D/g, '').slice(-10);
+    const identity = email && mobile
+      ? { contact_identity: createHash('sha256').update(`${email}|${mobile}`).digest('hex') } : {};
+    return row.extra_data && typeof row.extra_data === 'object'
+      ? { ...row, ...identity, extra_data: Object.fromEntries(Object.entries(row.extra_data)
+        .filter(([key]) => !/(?:api.?key|access.?key|secret|token|password|authorization|(?:^|[_-])key(?:$|[_-]))/i.test(key))) }
+      : { ...row, ...identity };
+  };
   return { ...result, data: maskContactData(Array.isArray(result.data) ? result.data.map(strip) : strip(result.data)) };
 }
 
