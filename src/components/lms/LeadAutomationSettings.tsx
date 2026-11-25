@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Trash2, Zap } from 'lucide-react';
+import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Plus, RotateCcw, Trash2, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -17,7 +17,8 @@ type Condition = { field: string; operator: string; value: string };
 type FieldDefault = { targetField: string; value: string };
 type FieldSource = { targetField: string; sourceField: string };
 type FieldTransform = { sourceField: string; equals: string; targetField: string; value: string };
-type DestinationOverrides = { defaults: FieldDefault[]; fixed?: FieldDefault[]; sources: FieldSource[]; transforms: FieldTransform[] };
+type DestinationOverrides = { defaults: FieldDefault[]; fixed?: FieldDefault[]; retry?: FieldDefault[];
+  sources: FieldSource[]; transforms: FieldTransform[] };
 type Rule = { id: string; name: string; priority: number; status: 'Active' | 'Paused';
   match_mode: 'all' | 'any'; conditions: Condition[]; destination_ids: string[];
   field_overrides?: Record<string, DestinationOverrides>; triggered_count?: number };
@@ -115,7 +116,8 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
         status: editing?.status || 'Active', match_mode: matchMode,
         conditions: conditions.map((condition) => ({ ...condition, field: condition.field.trim(), value: condition.value.trim() })),
         destination_ids: destinations,
-        field_overrides: Object.fromEntries(destinations.map((id) => [id, fieldOverrides[id] || { defaults: [], fixed: [], sources: [], transforms: [] }])) };
+        field_overrides: Object.fromEntries(destinations.map((id) => [id, fieldOverrides[id] ||
+          { defaults: [], fixed: [], retry: [], sources: [], transforms: [] }])) };
       const query = editing
         ? api.from('inbound_routing_rules').update(values).eq('id', editing.id)
         : api.from('inbound_routing_rules').insert(values);
@@ -157,51 +159,65 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
     return fields.filter((field) => field.name && !/key|secret|token|password|authorization/i.test(field.name) && !['college_id','__proto__','prototype','constructor'].includes(field.name.toLowerCase()));
   };
   const updateOverrides = (id: string, update: (value: DestinationOverrides) => DestinationOverrides) =>
-    setFieldOverrides((previous) => ({ ...previous, [id]: update(previous[id] || { defaults: [], fixed: [], sources: [], transforms: [] }) }));
+    setFieldOverrides((previous) => ({ ...previous, [id]: update(previous[id] ||
+      { defaults: [], fixed: [], retry: [], sources: [], transforms: [] }) }));
+
+  const correctionCount = (rule: Rule) => Object.values(rule.field_overrides || {}).reduce((total, value) =>
+    total + (value.defaults?.length || 0) + (value.fixed?.length || 0) + (value.retry?.length || 0) +
+      (value.sources?.length || 0) + (value.transforms?.length || 0), 0);
 
   return <>
-    <Card className="p-4 space-y-3">
+    <Card className="overflow-hidden border-primary/20 shadow-sm">
+      <div className="space-y-3 bg-gradient-to-r from-primary/10 via-background to-emerald-500/5 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-semibold flex items-center gap-2"><Zap className="h-4 w-4" /> Lead push on creation</h2>
-          <p className="text-xs text-muted-foreground">Choose a university. Every new lead goes there unless you add a condition.</p>
+          <p className="mt-1 text-xs text-muted-foreground">When a lead arrives: match it, choose universities, prepare their fields, then push.</p>
         </div>
-        <Button size="sm" onClick={() => show(null)}><Plus className="h-4 w-4 mr-1" /> New rule</Button>
+        <Button size="sm" onClick={() => show(null)}><Plus className="h-4 w-4 mr-1" /> Create automation</Button>
       </div>
       {loading ? <p className="text-sm text-muted-foreground">Loading rules...</p>
         : rules.length === 0 ? <p className="text-sm text-muted-foreground">No rules yet. New leads are saved here without an automatic push.</p>
-        : <div className="space-y-2">{rules.map((rule) => <div key={rule.id} className="border rounded p-3 flex flex-wrap justify-between gap-2">
-          <div>
+        : <div className="grid gap-2 lg:grid-cols-2">{rules.map((rule) => <div key={rule.id} className="rounded-xl border bg-background/90 p-3 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
             <div className="flex items-center gap-2"><strong className="text-sm">{rule.name}</strong>
               <Badge variant={rule.status === 'Active' ? 'default' : 'secondary'}>{rule.status}</Badge></div>
-            <p className="text-xs text-muted-foreground">{rule.conditions?.length
-              ? (rule.match_mode === 'any' ? 'Any: ' : 'All: ') + rule.conditions.map((condition) =>
-                condition.field + ' ' + (OPERATORS.find(([key]) => key === condition.operator)?.[1] || condition.operator) + ' ' + condition.value).join('; ')
-              : 'Every new lead'}</p>
-            <p className="text-xs text-muted-foreground">Push to: {destinationNames(rule.destination_ids || [])} · Triggered {rule.triggered_count || 0} times</p>
+            <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              <span className="rounded bg-muted px-2 py-1">{rule.conditions?.length ? `${rule.conditions.length} condition${rule.conditions.length === 1 ? '' : 's'}` : 'Every lead'}</span>
+              <ArrowRight className="h-3 w-3" />
+              <span className="rounded bg-muted px-2 py-1">{destinationNames(rule.destination_ids || [])}</span>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">{rule.triggered_count || 0} pushes · {correctionCount(rule)} field setting{correctionCount(rule) === 1 ? '' : 's'}</p>
           </div>
           <div className="flex gap-1">
             <Button size="sm" variant="outline" onClick={() => show(rule)}>Edit</Button>
             <Button size="sm" variant="outline" onClick={() => toggle(rule)}>{rule.status === 'Active' ? 'Pause' : 'Enable'}</Button>
             <Button size="sm" variant="ghost" aria-label={'Delete ' + rule.name} onClick={() => remove(rule)}><Trash2 className="h-4 w-4" /></Button>
           </div>
+          </div>
         </div>)}</div>}
+      </div>
     </Card>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{editing ? 'Edit lead push on creation' : 'New lead push on creation'}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{editing ? 'Edit lead automation' : 'Create lead automation'}</DialogTitle></DialogHeader>
         <div className="space-y-4">
-          <div><Label>Rule name</Label><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Send new leads to LPU" /></div>
-          <div>
-            <Label>When should it run?</Label>
+          <section className="rounded-xl border p-4"><div className="mb-3 flex items-center gap-2"><Badge>1</Badge><div><h3 className="text-sm font-semibold">Name this automation</h3><p className="text-xs text-muted-foreground">Use a name your team will recognise.</p></div></div>
+            <Input aria-label="Automation name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Example: Facebook leads → LPU" />
+          </section>
+          <section className="rounded-xl border p-4">
+            <div className="mb-3 flex items-center gap-2"><Badge>2</Badge><div><h3 className="text-sm font-semibold">Choose which leads</h3><p className="text-xs text-muted-foreground">No condition means every new API, website, or ad lead.</p></div></div>
             <p className="text-xs text-muted-foreground">{conditions.length ? 'Only leads matching these conditions' : 'Every new lead from API or connected ads'}</p>
             {conditions.length > 1 && <Select value={matchMode} onValueChange={(value) => setMatchMode(value as 'all' | 'any')}>
               <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="all">Match all conditions</SelectItem><SelectItem value="any">Match any condition</SelectItem></SelectContent>
             </Select>}
-            <div className="space-y-2 mt-2">{conditions.map((condition, index) => <div key={index} className="grid grid-cols-[1fr_9rem_1fr_auto] gap-2 items-center">
-              <Input list="lead-automation-fields" value={condition.field} placeholder="city"
-                onChange={(event) => setConditions((prev) => prev.map((item, i) => i === index ? { ...item, field: event.target.value } : item))} />
+            <div className="space-y-2 mt-2">{conditions.map((condition, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-lg bg-muted/30 p-2 sm:grid-cols-[1fr_9rem_1fr_auto] sm:items-center">
+              <Select value={condition.field} onValueChange={(value) => setConditions((prev) => prev.map((item, i) => i === index ? { ...item, field: value } : item))}>
+                <SelectTrigger aria-label="Lead field"><SelectValue placeholder="Choose lead field" /></SelectTrigger>
+                <SelectContent>{incomingColumns.map((column) => <SelectItem key={column.value} value={column.value}>{column.label}</SelectItem>)}</SelectContent>
+              </Select>
               <Select value={condition.operator} onValueChange={(value) => setConditions((prev) =>
                 prev.map((item, i) => i === index ? { ...item, operator: value } : item))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -212,15 +228,13 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
               <Button variant="ghost" size="icon" aria-label="Remove condition"
                 onClick={() => setConditions((prev) => prev.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4" /></Button>
             </div>)}</div>
-            <datalist id="lead-automation-fields">{incomingColumns.map((column) =>
-              <option key={column.value} value={column.value} label={column.label} />)}</datalist>
             <Button size="sm" variant="outline" className="mt-2" onClick={() =>
-              setConditions((prev) => [...prev, { field: 'city', operator: 'is', value: '' }])}>
+              setConditions((prev) => [...prev, { field: '', operator: 'is', value: '' }])}>
               <Plus className="h-3 w-3 mr-1" /> Add condition
             </Button>
-          </div>
-          <div>
-            <Label>Send to university</Label>
+          </section>
+          <section className="rounded-xl border p-4">
+            <div className="mb-3 flex items-center gap-2"><Badge>3</Badge><div><h3 className="text-sm font-semibold">Choose universities</h3><p className="text-xs text-muted-foreground">A matching lead is pushed once to every selected university.</p></div></div>
             <Input className="mt-1" aria-label="Search universities" placeholder="Search universities" value={destinationSearch} onChange={(event) => setDestinationSearch(event.target.value)} />
             <ScrollArea className="h-32 border rounded p-2 mt-1"><div className="space-y-1">{universities.filter((university) =>
               destinations.includes(university.id) || university.name.toLowerCase().includes(destinationSearch.trim().toLowerCase())).map((university) =>
@@ -230,9 +244,10 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
                 {university.name}
               </label>)}</div></ScrollArea>
             {!!destinations.length && <p className="mt-1 text-xs text-muted-foreground">Selected: {destinationNames(destinations)}</p>}
-          </div>
-          <Button type="button" variant="outline" className="w-full" onClick={() => setShowPartnerFields((value) => !value)}>
-            {showPartnerFields ? 'Hide partner field settings' : 'Customize partner field values (optional)'}
+          </section>
+          <Button type="button" variant="outline" className="h-auto w-full justify-between py-3" onClick={() => setShowPartnerFields((value) => !value)}>
+            <span className="text-left"><span className="block font-semibold">4 · University field values and retry fixes</span><span className="block text-xs font-normal text-muted-foreground">Optional: fix mappings, blanks, rejected values, or always-send values.</span></span>
+            {showPartnerFields ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </Button>
           {showPartnerFields && <div className="space-y-4">
             <label className="flex items-center gap-2 text-xs text-muted-foreground">Rule priority
@@ -242,12 +257,16 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
             const university = universities.find((item) => item.id === id);
             if (!university) return null;
             const fields = partnerFields(university);
-            const override = fieldOverrides[id] || { defaults: [], fixed: [], sources: [], transforms: [] };
+            const override = fieldOverrides[id] || { defaults: [], fixed: [], retry: [], sources: [], transforms: [] };
             return <div key={id} className="space-y-3 rounded-lg border p-4">
               <div><h3 className="font-semibold">{university.name} · partner fields</h3>
-                <p className="text-xs text-muted-foreground">Always send replaces the lead value for this university. Fallback is used only when the lead value is blank.</p></div>
+                <p className="text-xs text-muted-foreground">Blank fallback protects missing data. Retry value replaces a rejected value only when your team retries a failed delivery.</p></div>
+              {!!fields.some((field) => field.saved) && <Button type="button" size="sm" variant="outline" onClick={() => updateOverrides(id, (current) => ({ ...current,
+                retry: fields.filter((field) => field.saved).map((field) => ({ targetField: field.name, value: field.saved })) }))}>
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Use saved university defaults on retry
+              </Button>}
               {fields.length ? <div className="max-h-64 overflow-auto rounded-md border">
-                <table className="w-full min-w-[850px] text-sm"><thead className="bg-muted/50 text-left text-xs"><tr><th className="p-2">Partner field</th><th className="p-2">Saved mapping / value</th><th className="p-2">Use incoming field</th><th className="p-2">Fallback if blank</th><th className="p-2">Always send</th></tr></thead>
+                <table className="w-full min-w-[1050px] text-sm"><thead className="bg-muted/50 text-left text-xs"><tr><th className="p-2">Partner field</th><th className="p-2">Saved mapping / value</th><th className="p-2">Use incoming field</th><th className="p-2">If blank</th><th className="p-2">If retrying failure</th><th className="p-2">Always send</th></tr></thead>
                   <tbody>{fields.map((field) => <tr key={field.name} className="border-t"><td className="p-2 font-medium">{field.label}<span className="block text-xs font-normal text-muted-foreground">{field.name}</span></td>
                     <td className="p-2 text-xs text-muted-foreground">{field.source}{field.saved ? ` · ${field.saved}` : ''}</td>
                     <td className="p-2"><Input list="lead-automation-fields" aria-label={`Incoming field for ${field.name} at ${university.name}`} placeholder={field.source === 'lead_data' || field.source === 'static' || field.source === 'dynamic' ? 'Use saved mapping' : field.source}
@@ -260,12 +279,18 @@ export function LeadAutomationSettings({ incomingExtraFields = [] }: { incomingE
                       onChange={(event) => updateOverrides(id, (current) => ({ ...current,
                         defaults: [...current.defaults.filter((item) => item.targetField !== field.name),
                           ...(event.target.value ? [{ targetField: field.name, value: event.target.value }] : [])] }))} /></td>
+                    <td className="p-2"><Input aria-label={`Retry value ${field.name} for ${university.name}`} placeholder={field.saved || 'Keep original value'} maxLength={1000}
+                      value={override.retry?.find((item) => item.targetField === field.name)?.value || ''}
+                      onChange={(event) => updateOverrides(id, (current) => ({ ...current,
+                        retry: [...(current.retry || []).filter((item) => item.targetField !== field.name),
+                          ...(event.target.value ? [{ targetField: field.name, value: event.target.value }] : [])] }))} /></td>
                     <td className="p-2"><Input aria-label={`Always send ${field.name} for ${university.name}`} placeholder="Use lead value" maxLength={1000}
                       value={override.fixed?.find((item) => item.targetField === field.name)?.value || ''}
                       onChange={(event) => updateOverrides(id, (current) => ({ ...current,
                         fixed: [...(current.fixed || []).filter((item) => item.targetField !== field.name),
                           ...(event.target.value ? [{ targetField: field.name, value: event.target.value }] : [])] }))} /></td></tr>)}</tbody>
                 </table></div> : <p className="text-xs text-muted-foreground">Add partner payload fields in the university integration before setting field values here.</p>}
+              {!!override.retry?.length && <p className="flex items-center gap-1.5 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" />{override.retry.length} retry correction{override.retry.length === 1 ? '' : 's'} configured for this university.</p>}
               {!!fields.length && <div className="space-y-2"><div><h4 className="text-sm font-semibold">Conditional field values</h4><p className="text-xs text-muted-foreground">Choose an incoming All Leads column. Leave Equals blank to match an empty or missing value. The first matching row for a partner field wins.</p></div>
                 <div className="hidden sm:grid sm:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 px-2 text-xs font-medium text-muted-foreground"><span>All Leads column</span><span>Equals (blank = empty)</span><span>Partner API field</span><span>Send this value</span><span className="w-9" /></div>
                 {override.transforms.map((row,index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md bg-muted/30 p-2 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] sm:items-center">

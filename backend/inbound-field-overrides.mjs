@@ -62,7 +62,7 @@ function fieldDefinitions(mapping) {
   return fields;
 }
 
-export function applyInboundFieldOverrides(leadData, payload, university, settings) {
+export function applyInboundFieldOverrides(leadData, payload, university, settings, { retry = false } = {}) {
   let mapping = university?.column_mapping || {};
   if (typeof mapping === 'string') {
     try { mapping = JSON.parse(mapping); } catch { mapping = {}; }
@@ -75,6 +75,7 @@ export function applyInboundFieldOverrides(leadData, payload, university, settin
   const fixed = Array.isArray(settings.fixed) ? settings.fixed.slice(0, 50) : [];
   const sources = Array.isArray(settings.sources) ? settings.sources.slice(0, 50) : [];
   const transforms = Array.isArray(settings.transforms) ? settings.transforms.slice(0, 50) : [];
+  const retryValues = retry && Array.isArray(settings.retry) ? settings.retry.slice(0, 50) : [];
   const nextMapping = { ...mapping };
   let changed = false;
 
@@ -90,8 +91,10 @@ export function applyInboundFieldOverrides(leadData, payload, university, settin
       String(readPath(leadData, item.sourceField) ?? readPath(raw, item.sourceField) ?? '').trim().toLowerCase() === item.equals.trim().toLowerCase());
     const fallback = defaults.find((item) => item?.targetField === target && typeof item.value === 'string' && item.value.trim());
     const always = fixed.find((item) => item?.targetField === target && typeof item.value === 'string' && item.value.trim());
+    const retryValue = retryValues.find((item) => item?.targetField === target && typeof item.value === 'string' && item.value.trim());
     const existing = readPath(leadData, sourceKey);
-    const value = always?.value || transform?.value || (existing == null || String(existing).trim() === '' || !source && definition.config.sourceType === 'static' ? fallback?.value : '');
+    const value = retryValue?.value || always?.value || transform?.value ||
+      (existing == null || String(existing).trim() === '' || !source && definition.config.sourceType === 'static' ? fallback?.value : '');
     if (!value || value.length > 1000) continue;
     if (definition.key) nextMapping[definition.key] = JSON.stringify({ ...definition.config, sourceType: 'static', staticValue: value });
     else nextMapping[`__static_${target}`] = value;

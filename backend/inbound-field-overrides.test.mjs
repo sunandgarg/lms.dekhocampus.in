@@ -63,6 +63,19 @@ test('an empty equals value matches blank or missing incoming fields only', () =
   assert.equal(applyInboundFieldOverrides({ state: 'Delhi' }, { state: 'Delhi' }, university, settings), null);
 });
 
+test('retry correction replaces a rejected nonempty field only during retry', () => {
+  const lead = { name: 'A', city: 'Gurugram', course: 'BTech', email: 'a@example.com' };
+  const settings = { retry: [
+    { targetField: 'program', value: 'B.Tech. (Computer Science and Engineering)' },
+    { targetField: 'campus', value: 'Noida' },
+  ] };
+  assert.equal(applyInboundFieldOverrides(lead, lead, university, settings), null);
+  const changed = applyInboundFieldOverrides(lead, lead, university, settings, { retry: true });
+  const payload = buildPayload(lead, { apiType: 'generic', columnMapping: changed.columnMapping }).payload;
+  assert.equal(payload.program, 'B.Tech. (Computer Science and Engineering)');
+  assert.equal(payload.campus, 'Noida');
+});
+
 test('All Leads Medium column uses the normalized incoming lead medium', () => {
   const lead = { leadMedium: 'paid' };
   const changed = applyInboundFieldOverrides(lead, lead, university, {

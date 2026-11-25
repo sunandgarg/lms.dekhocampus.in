@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, X, Trash2, CheckCircle2, XCircle, Clock3 } from "lucide-react";
+import { AlertTriangle, BarChart3, Download, Search, Eye, RefreshCw, ChevronDown, ChevronUp, Filter, Loader2, Zap, Inbox, X, Trash2, CheckCircle2, XCircle, Clock3, TrendingUp } from "lucide-react";
 import { api } from "@/integrations/api/client";
 import { DataRetentionNotice } from "@/components/ui/DataRetentionNotice";
 import { LeadAutomationSettings } from './LeadAutomationSettings';
@@ -230,6 +230,7 @@ export function AllLeadsPage() {
   const [showAutomation, setShowAutomation] = useState(false);
   const [showAttribution, setShowAttribution] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  const [showInsights, setShowInsights] = useState(true);
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const [attributionVersion, setAttributionVersion] = useState(0);
   const fetchLeads = useCallback(
@@ -382,6 +383,30 @@ export function AllLeadsPage() {
     if (notPushed) counts.needsAttention++;
     return counts;
   }, { inboxOnly: 0, sent: 0, needsAttention: 0 }), [grouped]);
+  const insights = useMemo(() => {
+    const today = leadDay({ receivedAt: new Date().toISOString() } as LmsLead);
+    const delivery = { sent: 0, failed: 0, duplicate: 0, pending: 0 };
+    const sourceCounts = new Map<string, number>();
+    const campaignCounts = new Map<string, number>();
+    let todayCount = 0;
+    for (const lead of filtered) {
+      if (leadDay(lead) === today) todayCount++;
+      const source = attributionSource(lead);
+      sourceCounts.set(source, (sourceCounts.get(source) || 0) + 1);
+      if (lead.campaign) campaignCounts.set(lead.campaign, (campaignCounts.get(lead.campaign) || 0) + 1);
+      for (const item of lead.deliveries) {
+        const result = deliveryResult(item);
+        if (result === 'Pushed') delivery.sent++;
+        else if (result === 'Duplicate') delivery.duplicate++;
+        else if (result === 'Pending') delivery.pending++;
+        else delivery.failed++;
+      }
+    }
+    const completed = delivery.sent + delivery.failed + delivery.duplicate;
+    const highest = (values: Map<string, number>) => [...values].sort((a, b) => b[1] - a[1])[0] || ['', 0];
+    return { todayCount, delivery, successRate: completed ? Math.round(delivery.sent / completed * 100) : 0,
+      topSource: highest(sourceCounts), topCampaign: highest(campaignCounts) };
+  }, [filtered]);
 
   const sources = useMemo(() => [...new Set(leads.map(attributionSource).filter((value) => value !== '-'))], [leads]);
   const media = useMemo(() => [...new Set(leads.map((lead) => lead.medium).filter(Boolean))], [leads]);
@@ -693,24 +718,45 @@ export function AllLeadsPage() {
         .flatMap((lead) => Object.keys(lead.extraData || {})))].sort()} />}
       {isAdmin && showAttribution && <AttributionRulesSettings key={attributionVersion} />}
 
-      <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-        <span className="font-semibold text-foreground">Source</span> = where the lead came from (for example, Facebook);{' '}
-        <span className="font-semibold text-foreground">Medium</span> = channel or traffic type (for example, paid);{' '}
-        <span className="font-semibold text-foreground">Campaign</span> = the ad campaign or tracking name.
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Lead overview">
-        {[
-          ['Total submissions', totalSubmissions ?? leads.length, 'text-foreground'],
-          ['Sent to university', viewSummary.sent, 'text-emerald-700'],
-          ['Needs attention', viewSummary.needsAttention, 'text-red-700'],
-          ['Inbox only', viewSummary.inboxOnly, 'text-muted-foreground'],
-        ].map(([label, count, color]) => <Card key={String(label)} className="px-4 py-3 shadow-sm">
-          <p className="text-xs font-medium text-muted-foreground">{label}</p>
-          <p className={`mt-1 text-2xl font-bold tabular-nums ${color}`}>{count}</p>
-          {label === 'Total submissions' && <p className="text-xs text-muted-foreground">{filtered.length} matching in loaded rows · {grouped.length} contacts{hasMore ? ' · load older below' : ''}</p>}
-        </Card>)}
-      </div>
+      <Card className="overflow-hidden border-primary/20 shadow-md" aria-label="Lead performance overview">
+        <button type="button" className="flex w-full items-center justify-between gap-4 bg-gradient-to-r from-primary/10 via-background to-emerald-500/10 px-4 py-3 text-left md:px-5"
+          onClick={() => setShowInsights((value) => !value)} aria-expanded={showInsights}>
+          <span className="flex min-w-0 items-center gap-3"><span className="rounded-xl bg-primary/10 p-2 text-primary"><BarChart3 className="h-5 w-5" /></span>
+            <span><span className="block font-semibold">Lead performance</span><span className="block text-xs text-muted-foreground">Live view of the loaded leads · responds to your filters</span></span></span>
+          <span className="flex items-center gap-2"><Badge variant="secondary">{filtered.length} matching</Badge>{showInsights ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+        </button>
+        {showInsights && <div className="space-y-4 p-4 md:p-5">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            <button type="button" onClick={() => setStatusFilter('all')} className="rounded-xl border bg-background p-3 text-left transition hover:border-primary/50 hover:shadow-sm">
+              <p className="text-xs font-medium text-muted-foreground">All submissions</p><p className="mt-1 text-2xl font-bold tabular-nums">{totalSubmissions ?? leads.length}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{filtered.length} match current filters</p>
+            </button>
+            <button type="button" onClick={() => setStatusFilter('Pushed')} className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-left transition hover:shadow-sm dark:bg-emerald-950/20">
+              <p className="text-xs font-medium text-emerald-700">Sent to university</p><p className="mt-1 text-2xl font-bold tabular-nums text-emerald-700">{viewSummary.sent}</p>
+              <p className="mt-1 text-xs text-emerald-700/80">{insights.successRate}% accepted delivery rate</p>
+            </button>
+            <button type="button" onClick={() => setStatusFilter('Failed')} className="rounded-xl border border-red-200 bg-red-50/60 p-3 text-left transition hover:shadow-sm dark:bg-red-950/20">
+              <p className="flex items-center gap-1 text-xs font-medium text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> Needs attention</p><p className="mt-1 text-2xl font-bold tabular-nums text-red-700">{viewSummary.needsAttention}</p>
+              <p className="mt-1 text-xs text-red-700/80">{insights.delivery.failed} failed · {insights.delivery.duplicate} duplicate</p>
+            </button>
+            <div className="rounded-xl border bg-muted/25 p-3"><p className="text-xs font-medium text-muted-foreground">Inbox only</p><p className="mt-1 text-2xl font-bold tabular-nums">{viewSummary.inboxOnly}</p><p className="mt-1 text-xs text-muted-foreground">No university selected</p></div>
+            <div className="rounded-xl border bg-muted/25 p-3"><p className="text-xs font-medium text-muted-foreground">Received today</p><p className="mt-1 text-2xl font-bold tabular-nums">{insights.todayCount}</p><p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><TrendingUp className="h-3.5 w-3.5" /> India time</p></div>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+            <div className="rounded-xl border p-3"><div className="flex items-center justify-between gap-2"><p className="text-sm font-semibold">University delivery</p><p className="text-xs text-muted-foreground">{insights.delivery.pending} pending</p></div>
+              <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-muted" aria-label={`${insights.delivery.sent} sent, ${insights.delivery.failed} failed, ${insights.delivery.duplicate} duplicate, ${insights.delivery.pending} pending`}>
+                {!!insights.delivery.sent && <span className="bg-emerald-500" style={{ flex: insights.delivery.sent }} />}
+                {!!insights.delivery.failed && <span className="bg-red-500" style={{ flex: insights.delivery.failed }} />}
+                {!!insights.delivery.duplicate && <span className="bg-amber-400" style={{ flex: insights.delivery.duplicate }} />}
+                {!!insights.delivery.pending && <span className="bg-sky-400" style={{ flex: insights.delivery.pending }} />}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs"><span className="text-emerald-700">● {insights.delivery.sent} sent</span><span className="text-red-700">● {insights.delivery.failed} failed</span><span className="text-amber-700">● {insights.delivery.duplicate} duplicate</span><span className="text-sky-700">● {insights.delivery.pending} pending</span></div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 rounded-xl border p-3"><div><p className="text-xs text-muted-foreground">Top source</p><p className="mt-1 truncate text-sm font-semibold" title={String(insights.topSource[0])}>{insights.topSource[0] || 'No source yet'}</p><p className="text-xs text-muted-foreground">{insights.topSource[1]} leads</p></div><div><p className="text-xs text-muted-foreground">Top campaign</p><p className="mt-1 truncate text-sm font-semibold" title={String(insights.topCampaign[0])}>{insights.topCampaign[0] || 'No campaign yet'}</p><p className="text-xs text-muted-foreground">{insights.topCampaign[1]} leads</p></div></div>
+          </div>
+          <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground"><strong className="text-foreground">Source</strong> is where the lead came from · <strong className="text-foreground">Medium</strong> is the traffic type, such as paid · <strong className="text-foreground">Campaign</strong> is the ad or tracking name.</p>
+        </div>}
+      </Card>
 
       <Card className="overflow-hidden shadow-sm">
         <div className="space-y-3 border-b p-4">

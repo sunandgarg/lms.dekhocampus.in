@@ -38,7 +38,7 @@ export async function refreshedRetryApiConfig(db, lead, data, originalConfig) {
   if (!university) return originalConfig;
   const rules = await matchingInboundRules(db, data, data);
   const rule = rules.find((item) => item.destination_ids.includes(lead.university_id) && item.field_overrides?.[lead.university_id]);
-  const override = applyInboundFieldOverrides(data, data, university, rule?.field_overrides?.[lead.university_id]);
+  const override = applyInboundFieldOverrides(data, data, university, rule?.field_overrides?.[lead.university_id], { retry: true });
   return override ? { ...originalConfig, ...override } : originalConfig;
 }
 

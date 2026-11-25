@@ -35,6 +35,7 @@ test('incoming retry uses the current university routing correction', async () =
     if (values[0] === 'inbound_routing_rules') return [[{ data: { status: 'Active', priority: 1,
       conditions: [], destination_ids: [universityId], field_overrides: { [universityId]: {
         fixed: [{ targetField: 'source', value: 'dekhocampus' }],
+        retry: [{ targetField: 'source', value: 'retry-source' }],
       } },
     } }]];
     return [[]];
@@ -42,6 +43,6 @@ test('incoming retry uses the current university routing correction', async () =
   const original = { columnMapping: { __field_source: JSON.stringify({ fieldName: 'source', sourceType: 'lead_data', sourceKey: 'source' }) } };
   const updated = await refreshedRetryApiConfig(db, { university_id: universityId, extra_data: { inbound_lead_id: inboundId } },
     { source: 'Facebook Lead Ads' }, original);
-  assert.equal(JSON.parse(updated.columnMapping.__field_source).staticValue, 'dekhocampus');
+  assert.equal(JSON.parse(updated.columnMapping.__field_source).staticValue, 'retry-source');
   assert.equal(updated.apiType, undefined);
 });
