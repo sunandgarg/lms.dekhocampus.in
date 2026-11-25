@@ -367,7 +367,7 @@ export function AllLeadsPage() {
   };
 
   const segmentCounts = useMemo(() => {
-    const count = (items: LmsLead[]) => new Set(items.map(leadIdentity)).size;
+    const count = (items: LmsLead[]) => items.length;
     return { all: count(leads), facebook: count(leads.filter((lead) => leadChannel(lead) === 'facebook')),
       google: count(leads.filter((lead) => leadChannel(lead) === 'google')),
       other: count(leads.filter((lead) => leadChannel(lead) === 'other')), repeat: repeatKeys.size };
@@ -698,20 +698,21 @@ export function AllLeadsPage() {
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Lead overview">
         {[
-          ['Matching leads', grouped.length, 'text-foreground'],
+          ['Matching submissions', filtered.length, 'text-foreground'],
           ['Sent to university', viewSummary.sent, 'text-emerald-700'],
           ['Needs attention', viewSummary.needsAttention, 'text-red-700'],
           ['Inbox only', viewSummary.inboxOnly, 'text-muted-foreground'],
         ].map(([label, count, color]) => <Card key={String(label)} className="px-4 py-3 shadow-sm">
           <p className="text-xs font-medium text-muted-foreground">{label}</p>
           <p className={`mt-1 text-2xl font-bold tabular-nums ${color}`}>{count}</p>
+          {label === 'Matching submissions' && <p className="text-xs text-muted-foreground">{grouped.length} unique contacts{hasMore ? ' · older submissions not loaded' : ''}</p>}
         </Card>)}
       </div>
 
       <Card className="overflow-hidden shadow-sm">
         <div className="space-y-3 border-b p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div><h2 className="text-lg font-semibold">Lead list</h2><p className="text-sm text-muted-foreground">{hasMore ? 'Older leads can be loaded below the list.' : 'Open a name or delivery status for details.'}</p></div>
+            <div><h2 className="text-lg font-semibold">Lead list</h2><p className="text-sm text-muted-foreground">{hasMore ? `Showing the latest ${leads.length} submissions. Load older submissions below for a full count.` : 'Open a name or delivery status for details.'}</p></div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} aria-expanded={showFilters}>
                 <Filter className="mr-2 h-4 w-4" /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
