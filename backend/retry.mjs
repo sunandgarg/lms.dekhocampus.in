@@ -68,7 +68,7 @@ export async function retryLeads({ db, s3, bucket, leadIds, userId, maxRetries =
   }
   const { data: found } = await executeRecords(db, { table: 'leads', select: '*',
     filters: [{ field: 'id', op: 'in', value: leadIds }, { field: 'deleted_at', op: 'is', value: null }], limit: 100 });
-  const eligible = found.filter((lead) => ['Fail', 'failed'].includes(lead.status) && Number(lead.retry_count || 0) < maxRetries);
+  const eligible = found.filter((lead) => ['Fail', 'failed', 'DLL_Blocked'].includes(lead.status) && Number(lead.retry_count || 0) < maxRetries);
   if (!eligible.length) return { retried: 0, skipped: leadIds.length, results: [] };
   const results = [];
   for (const lead of eligible) {
@@ -83,7 +83,7 @@ export async function retryLeads({ db, s3, bucket, leadIds, userId, maxRetries =
       const csv = fields.map(cell).join(',') + '\n' + fields.map((field) => cell(data[field])).join(',') + '\n';
       await saveSourceFile({ s3, bucket, batchId: batch.id, filename: 'retry.csv', body: Buffer.from(csv) });
       const [claimed] = await db.execute(
-        "UPDATE lms_records SET data = JSON_SET(data, '$.status', 'Retrying') WHERE collection = 'leads' AND id = ? AND record_status IN ('Fail', 'failed') AND JSON_EXTRACT(data, '$.deleted_at') IS NULL",
+        "UPDATE lms_records SET data = JSON_SET(data, '$.status', 'Retrying') WHERE collection = 'leads' AND id = ? AND record_status IN ('Fail', 'failed', 'DLL_Blocked') AND JSON_EXTRACT(data, '$.deleted_at') IS NULL",
         [lead.id],
       );
       if (!claimed.affectedRows) {
@@ -133,6 +133,20 @@ export async function runAutoRetries({ db, s3, bucket }) {
   if (autoRetryRunning) return;
   autoRetryRunning = true;
   try {
+    const indiaTime = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
+    const part = (name) => indiaTime.find((item) => item.type === name)?.value;
+    const today = `${part('year')}-${part('month')}-${part('day')}`;
+    if (Number(part('hour')) >= 1) {
+      const [blocked] = await db.execute(`SELECT id, data FROM lms_records WHERE collection = 'leads'
+        AND record_status = 'DLL_Blocked' AND JSON_EXTRACT(data, '$.deleted_at') IS NULL
+        AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.processed_at')) < ? ORDER BY created_at LIMIT 100`, [new Date(`${today}T00:00:00+05:30`).toISOString()]);
+      for (const row of blocked) {
+        const lead = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+        if (!lead.user_id) continue;
+        try { await retryLeads({ db, s3, bucket, leadIds: [row.id], userId: lead.user_id, maxRetries: 365 }); }
+        catch (error) { console.error('Daily-limit retry failed for lead', row.id, error); }
+      }
+    }
     const { data: failed } = await executeRecords(db, { table: 'leads', select: 'id, university_id, user_id, retry_count, processed_at',
       filters: [{ field: 'status', op: 'in', value: ['Fail', 'failed'] }, { field: 'retry_count', op: 'lt', value: 10 },
         { field: 'deleted_at', op: 'is', value: null }],
